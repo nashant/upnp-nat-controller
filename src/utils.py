@@ -1,5 +1,5 @@
 from kopf import Meta
-from typing import Dict
+from typing import Dict, List
 from upnpy import UPnP
 from kopf import Annotations
 
