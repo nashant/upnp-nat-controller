@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Union
 from upnpy.ssdp.SSDPDevice import SSDPDevice
 from kopf import Annotations
 
@@ -10,8 +10,8 @@ class LoadBalancer(BaseModel):
     ip: str
     svc: SSDPDevice.Service
     annotations: Annotations
-    tcp_whitelist: List[int]
-    udp_whitelist: List[int]
+    tcp_whitelist: Union[List[int], None]
+    udp_whitelist: Union[List[int], None]
 
     class Config:
         arbitrary_types_allowed = True
