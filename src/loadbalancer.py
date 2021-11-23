@@ -3,21 +3,7 @@ from typing import List
 from upnpy.ssdp.SSDPDevice import SSDPDevice
 from kopf import Annotations
 
-
-def proto_enabled(proto: str, annotations: Annotations):
-    try:
-        return annotations[f"{proto}.advertise.upnp/enabled"] == "true"
-    except KeyError:
-        return False
-
-
-def get_ports(proto: str, annotations: Annotations) -> List[int]:
-    if not proto_enabled(proto):
-        return None
-    try:
-        return annotations[f"{proto}.advertise.upnp/ports"].split(",")
-    except KeyError:
-        return []
+from utils import get_ports
 
 
 class LoadBalancer(BaseModel):

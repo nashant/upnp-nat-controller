@@ -1,6 +1,7 @@
 from kopf import Meta
 from typing import Dict
 from upnpy import UPnP
+from kopf import Annotations
 
 
 def advertise_proto(annotations: Dict[str, str], proto: str) -> bool:
@@ -22,3 +23,19 @@ def get_svc():
     device = upnp.get_igd()
     svcs = device.get_services()
     return next(filter(lambda s: 'AddPortMapping' in s.actions, svcs), None)
+
+
+def proto_enabled(proto: str, annotations: Annotations):
+    try:
+        return annotations[f"{proto}.advertise.upnp/enabled"] == "true"
+    except KeyError:
+        return False
+
+
+def get_ports(proto: str, annotations: Annotations) -> List[int]:
+    if not proto_enabled(proto, annotations):
+        return None
+    try:
+        return annotations[f"{proto}.advertise.upnp/ports"].split(",")
+    except KeyError:
+        return []
