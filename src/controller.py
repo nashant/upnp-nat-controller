@@ -1,14 +1,22 @@
 import kopf
 
-from kopf import Logger, Meta, Spec, Status
+from kopf import Logger, Meta, Spec, Status, Annotations
 
 from const import KOPF_LB_PARAMS
+from utils import get_svc
+from loadbalancer import LoadBalancer
 
 
 @kopf.on.create('services', **KOPF_LB_PARAMS)
 @kopf.on.resume('services', **KOPF_LB_PARAMS)
-def create_lb(logger: Logger, meta: Meta, spec: Spec, status: Status, **_):
+def create_lb(logger: Logger, meta: Meta, spec: Spec, status: Status, annotations: Annotations, **_):
     logger.info(f"Adding LoadBalancer {meta.namespace}/{meta.name}")
+    lb = LoadBalancer(
+        ip=status["loadBalancer"]["ingress"][0]["ip"],
+        annotations=annotations,
+        svc=get_svc()
+    )
+    print(lb.json())
 
 
 @kopf.on.update('services', **KOPF_LB_PARAMS)

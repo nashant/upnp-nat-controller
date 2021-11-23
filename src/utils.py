@@ -15,9 +15,10 @@ def advertise_udp(meta: Meta, **_):
     return advertise_proto(meta.annotations, 'udp')
 
 
-def get_router():
+def get_svc():
     upnp = UPnP()
-    devices = upnp.discover()
+    if upnp.discover() == 0:
+        return None
     device = upnp.get_igd()
     svcs = device.get_services()
     return next(filter(lambda s: 'AddPortMapping' in s.actions, svcs), None)
