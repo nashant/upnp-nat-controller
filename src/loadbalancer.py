@@ -27,6 +27,9 @@ class LoadBalancer(BaseModel):
     tcp_whitelist: List[int]
     udp_whitelist: List[int]
 
+    class Config:
+        arbitrary_types_allowed = True
+
     def __init__(self, **data):
         data["tcp_whitelist"] = get_ports("tcp", data["annotations"])
         data["udp_whitelist"] = get_ports("udp", data["annotations"])
