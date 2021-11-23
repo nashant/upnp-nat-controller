@@ -32,4 +32,4 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: user/app:latest
+          tags: nashant/upnp-nat-controller:latest
