@@ -1,0 +1,22 @@
+import kopf
+
+from kopf import Logger, Meta, Spec, Status
+
+from const import KOPF_LB_PARAMS
+
+
+@kopf.on.create('services', **KOPF_LB_PARAMS)
+@kopf.on.resume('services', **KOPF_LB_PARAMS)
+def create_lb(logger: Logger, meta: Meta, spec: Spec, status: Status, **_):
+    logger.info(f"Adding LoadBalancer {meta.namespace}/{meta.name}")
+
+
+@kopf.on.update('services', **KOPF_LB_PARAMS)
+def update_lb(logger: Logger, meta: Meta, old: Spec, new: Status, **_):
+    logger.info(f"Updating LoadBalancer {meta.namespace}/{meta.name}")
+
+
+@kopf.on.delete('services', **KOPF_LB_PARAMS)
+def delete_lb(logger: Logger, meta: Meta, spec: Spec, status: Status, **_):
+    logger.info(f"Deleting LoadBalancer {meta.namespace}/{meta.name}")
+
