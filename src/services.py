@@ -16,7 +16,7 @@ def create_lb(logger: Logger, meta: Meta, spec: Spec, status: Status, annotation
         annotations=annotations,
         svc=get_svc()
     )
-    print(lb.json())
+    print(lb.dict())
 
 
 @kopf.on.update('services', **KOPF_LB_PARAMS)
