@@ -11,5 +11,5 @@ RUN apt-get update \
  && useradd -mb /tmp -s /bin/bash -u 1000 kopf \
  && chown -R kopf /app
 USER kopf
-WORKDIR /src
+WORKDIR /app
 ENTRYPOINT [ "kopf", "run", "--all-namespaces", "./controller.py"]
