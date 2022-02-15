@@ -35,7 +35,7 @@ class LoadBalancer(BaseModel):
                     NewExternalPort=port,
                     NewProtocol=proto,
                     NewInternalPort=port,
-                    NewInternalHost=self.ip,
+                    NewInternalClient=self.ip,
                     NewEnabled=1,
                     NewPortMappingDescription="",
                     NewLeaseDuration=0
