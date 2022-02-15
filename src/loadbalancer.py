@@ -2,6 +2,7 @@ from ipaddress import ip_address
 from pydantic import BaseModel
 from typing import Tuple, List, Union
 from upnpy.ssdp.SSDPDevice import SSDPDevice
+from upnpy.exceptions import SOAPError
 from kopf import Annotations, Logger
 
 from utils import get_ports
@@ -28,16 +29,21 @@ class LoadBalancer(BaseModel):
         for proto, port in self.ports:
             if logger is not None:
                 logger.info(f"Adding port mapping for {self.ip}:{port}/{proto}")
-            self.svc.AddPortMapping(
-                NewRemoteHost="",
-                NewExternalPort=port,
-                NewProtocol=proto,
-                NewInternalPort=port,
-                NewInternalHost=self.ip,
-                NewEnabled=1,
-                NewPortMappingDescription="",
-                NewLeaseDuration=0
-            )
+            try:
+                self.svc.AddPortMapping(
+                    NewRemoteHost="",
+                    NewExternalPort=port,
+                    NewProtocol=proto,
+                    NewInternalPort=port,
+                    NewInternalHost=self.ip,
+                    NewEnabled=1,
+                    NewPortMappingDescription="",
+                    NewLeaseDuration=0
+                )
+            except SOAPError as e:
+                if e.error == 718:
+                    logger.warn(f"Can't add port mapping, conflicting mapping exists")
+                raise(e)
 
     def unadvertise(self, logger: Union[Logger, None]):
         for proto, port in self.ports:

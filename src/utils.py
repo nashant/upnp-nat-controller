@@ -35,7 +35,7 @@ def proto_enabled(proto: str, annotations: Annotations):
 
 def get_ports(proto: str, annotations: Annotations) -> List[int]:
     if not proto_enabled(proto, annotations):
-        return None
+        return []
     try:
         return annotations[f"{proto}.advertise.upnp/ports"].split(",")
     except KeyError:
