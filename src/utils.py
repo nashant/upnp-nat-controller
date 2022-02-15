@@ -2,6 +2,7 @@ from kopf import Meta
 from typing import Dict, List
 from upnpy import UPnP
 from kopf import Annotations
+from upnpy.ssdp.SSDPDevice import SSDPDevice
 
 
 def advertise_proto(annotations: Dict[str, str], proto: str) -> bool:
@@ -16,11 +17,11 @@ def advertise_udp(meta: Meta, **_):
     return advertise_proto(meta.annotations, 'udp')
 
 
-def get_svc():
+def get_svc() -> SSDPDevice.Service:
     upnp = UPnP()
     if upnp.discover() == 0:
         return None
-    device = upnp.get_igd()
+    device: SSDPDevice = upnp.get_igd()
     svcs = device.get_services()
     return next(filter(lambda s: 'AddPortMapping' in s.actions, svcs), None)
 

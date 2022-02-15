@@ -1,15 +1,15 @@
-FROM python:3.10-slim
+FROM python:3.10-slim-bullseye
 
 EXPOSE 8080/tcp
 
-ADD ./src /src
-WORKDIR /src
+ADD src /app
 
-RUN groupadd -g 1000 app \
- && useradd -mb /tmp -s /bin/bash -u 1000 -g 1000 app \
+RUN apt-get update \
+ && apt-get upgrade -y \
  && pip install --upgrade pip \
- && pip install -r requirements.txt
-
-USER app
-
-ENTRYPOINT [ "kopf", "run", "./controller.py"]
+ && pip install -r /app/requirements.txt \
+ && useradd -mb /tmp -s /bin/bash -u 1000 kopf \
+ && chown -R kopf /app
+USER kopf
+WORKDIR /src
+ENTRYPOINT [ "kopf", "run", "--all-namespaces", "./controller.py"]
