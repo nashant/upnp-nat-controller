@@ -50,7 +50,7 @@ class LoadBalancer(BaseModel):
                 else:
                     raise(e)
         if len(unmapped) > 0:
-            unmapped_str = ", ".join(["/".join(port) for port in unmapped])
+            unmapped_str = ", ".join([f"{p[0]}/{p[1]}" for p in unmapped])
             kopf.TemporaryError(f"Unable to map ports: {unmapped_str}")
 
     def unadvertise(self, logger: Union[Logger, None]):
