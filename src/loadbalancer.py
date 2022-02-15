@@ -43,7 +43,8 @@ class LoadBalancer(BaseModel):
             except SOAPError as e:
                 if e.error == 718:
                     logger.warn(f"Can't add port mapping, conflicting mapping exists")
-                raise(e)
+                else:
+                    raise(e)
 
     def unadvertise(self, logger: Union[Logger, None]):
         for proto, port in self.ports:
