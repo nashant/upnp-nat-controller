@@ -1,3 +1,5 @@
+import kopf
+
 from ipaddress import ip_address
 from pydantic import BaseModel
 from typing import Tuple, List, Union
@@ -26,6 +28,7 @@ class LoadBalancer(BaseModel):
         super().__init__(**data)
 
     def advertise(self, logger: Union[Logger, None]) -> None:
+        unmapped = []
         for proto, port in self.ports:
             if logger is not None:
                 logger.info(f"Adding port mapping for {self.ip}:{port}/{proto}")
@@ -43,8 +46,12 @@ class LoadBalancer(BaseModel):
             except SOAPError as e:
                 if e.error == 718:
                     logger.warn(f"Can't add port mapping, conflicting mapping exists")
+                    unmapped.append((proto, port))
                 else:
                     raise(e)
+        if len(unmapped) > 0:
+            unmapped_str = ", ".join(["/".join(port) for u in unmapped])
+            kopf.TemporaryError(f"Unable to map ports: {unmapped_str}")
 
     def unadvertise(self, logger: Union[Logger, None]):
         for proto, port in self.ports:
