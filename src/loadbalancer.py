@@ -99,6 +99,6 @@ class LoadBalancer(BaseModel):
             )
             return (True, m["NewInternalClient"], m["NewPortMappingDescription"])
         except SOAPError as e:
-            if e == 714:
+            if e.error == 714:
                 return None
             raise(e)
