@@ -1,0 +1,47 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "upnp-nat-controller.rbacName" . }}
+  labels:
+    {{- include "upnp-nat-controller.labels" . | nindent 4 }}
+  {{- with .Values.rbac.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - "services"
+  verbs:
+  - "get"
+  - "list"
+  - "patch"
+  - "watch"
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "upnp-nat-controller.rbacName" . }}
+  labels:
+    {{- include "upnp-nat-controller.labels" . | nindent 4 }}
+  {{- with .Values.rbac.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "upnp-nat-controller.rbacName" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "upnp-nat-controller.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}
