@@ -19,6 +19,8 @@ def get_ip(d: dict, status: Status):
 def create_lb(logger: Logger, meta: Meta, spec: Spec, status: Status, annotations: Annotations, **_):
     logger.info(f"Adding LoadBalancer {meta.namespace}/{meta.name}")
     lb = LoadBalancer(
+        name=meta.name,
+        namespace=meta.namespace,
         ip=status["loadBalancer"]["ingress"][0]["ip"],
         annotations=annotations,
         svc=get_svc()
@@ -30,26 +32,31 @@ def create_lb(logger: Logger, meta: Meta, spec: Spec, status: Status, annotation
 def update_lb(logger: Logger, meta: Meta, old: Spec, new: Spec, annotations: Annotations, status: Status, **_):
     logger.info(f"Updating LoadBalancer {meta.namespace}/{meta.name}")
     old_lb = LoadBalancer(
+        name=meta.name,
+        namespace=meta.namespace,
         ip=get_ip(old, status),
         annotations=old.get("spec", {}).get("annotations", annotations),
         svc=get_svc()
     )
     new_lb = LoadBalancer(
+        name=meta.name,
+        namespace=meta.namespace,
         ip=get_ip(new, status),
         annotations=new.get("spec", {}).get("annotations", annotations),
         svc=get_svc()
     )
-    old_lb.unadvertise(logger)
+    old_lb.deadvertise(logger)
     new_lb.advertise(logger)
-
 
 
 @kopf.on.delete('services', **KOPF_LB_PARAMS)
 def delete_lb(logger: Logger, meta: Meta, spec: Spec, annotations: Annotations, status: Status, **_):
     logger.info(f"Deleting LoadBalancer {meta.namespace}/{meta.name}")
     lb = LoadBalancer(
+        name=meta.name,
+        namespace=meta.namespace,
         ip=status["loadBalancer"]["ingress"][0]["ip"],
         annotations=annotations,
         svc=get_svc()
     )
-    lb.unadvertise(logger)
+    lb.deadvertise(logger)
