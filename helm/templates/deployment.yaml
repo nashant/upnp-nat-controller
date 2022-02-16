@@ -35,7 +35,6 @@ spec:
             - name: http
               containerPort: 80
               protocol: TCP
-          {{- with .Values.config.filePath }}
           #livenessProbe:
           #  httpGet:
           #    path: /
