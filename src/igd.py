@@ -65,7 +65,7 @@ def get_or_create_igd() -> None:
 
 @kopf.on.startup()
 def set_igd(memo: Memo, **_):
-    memo.set("igd", IGD(get_device()))
+    memo["igd"] = IGD(get_device())
     get_or_create_igd()
 
 
