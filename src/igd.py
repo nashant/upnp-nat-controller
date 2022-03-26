@@ -42,31 +42,41 @@ class IGD:
                 self.__setattr__(action.name, action)
 
 
-def get_or_create_igd() -> None:
+def get_kube_api() -> CustomObjectsApi:
     config.load_incluster_config()
-    api: CustomObjectsApi = client.CustomObjectsApi()
-    group = "crd.nashes.uk"
-    version = "v1alpha1"
-    plural = "internetgatewaydevices"
-    name = "igd-device"
+    return client.CustomObjectsApi()
+
+
+IGD_ARGS = ("crd.nashes.uk", "v1alpha1", "internetgatewaydevices")
+IGD_NAME = "igd-device"
+
+def get_or_create_igd() -> None:
+    api = get_kube_api()
     try:
-        api.get_cluster_custom_object(group, version, plural, name)
+        api.get_cluster_custom_object(*IGD_ARGS, IGD_NAME)
     except:
         body = {
             "metadata": {
-                "name": name,
+                "name": IGD_NAME,
                 "labels": {
                     "createdBy": "igd-controller"
                 }
             }
         }
-        api.create_cluster_custom_object(group, version, plural, {}, body)
+        api.create_cluster_custom_object(*IGD_ARGS, {}, body)
 
 
 @kopf.on.startup()
 def set_igd(memo: Memo, **_):
     memo["igd"] = IGD(get_device())
     get_or_create_igd()
+
+
+@kopf.on.cleanup()
+def delete_igd(**_):
+    api = get_kube_api()
+    api.delete_cluster_custom_object(*IGD_ARGS, IGD_NAME)
+
 
 
 @kopf.timer('internetgatewaydevices', interval=10, initial_delay=60,
