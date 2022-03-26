@@ -78,7 +78,6 @@ def delete_igd(**_):
     api.delete_cluster_custom_object(*IGD_ARGS, IGD_NAME)
 
 
-
 @kopf.timer('internetgatewaydevices', interval=10, initial_delay=60,
            labels={'createdBy': 'igd-controller'})
 def ip(memo: Memo, **_):
