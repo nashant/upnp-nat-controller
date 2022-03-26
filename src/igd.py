@@ -70,13 +70,14 @@ def get_or_create_igd() -> None:
 
 @kopf.on.startup()
 def set_igd(memo: Memo, **_):
+    memo.run_timers = True
     memo["igd"] = IGD(get_device())
     get_or_create_igd()
 
 
 @kopf.on.cleanup()
 def delete_igd(memo: Memo, **_):
-    memo.run_timers = True
+    memo.run_timers = False
     api = get_kube_api()
     api.delete_cluster_custom_object(*IGD_ARGS, IGD_NAME)
 
