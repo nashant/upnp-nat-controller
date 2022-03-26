@@ -13,4 +13,5 @@ def configure(settings: kopf.OperatorSettings, memo: kopf.Memo, **_):
     )
 
 
+import igd
 import services
