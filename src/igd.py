@@ -80,71 +80,71 @@ def delete_igd(**_):
     api.delete_cluster_custom_object(*IGD_ARGS, IGD_NAME)
 
 
-@kopf.timer('internetgatewaydevices', interval=10, initial_delay=60,
+@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
            labels={'createdBy': 'igd-controller'})
 def ip(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return igd.dev.host
 
 
-@kopf.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'upnp-nat-controller'})
+@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
+           labels={'createdBy': 'igd-controller'})
 def externalIPAddress(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return igd.GetExternalIPAddress().get("NewExternalIPAddress")
 
 
-@kopf.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'upnp-nat-controller'})
+@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
+           labels={'createdBy': 'igd-controller'})
 def friendlyName(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     igd.dev.friendly_name
 
 
-@kopf.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'upnp-nat-controller'})
+@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
+           labels={'createdBy': 'igd-controller'})
 def connectionStatus(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return igd.GetStatusInfo().get("NewConnectionStatus")
 
 
-@kopf.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'upnp-nat-controller'})
+@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
+           labels={'createdBy': 'igd-controller'})
 def uptime(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetStatusInfo().get("NewUptime"))
 
 
-@kopf.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'upnp-nat-controller'})
+@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
+           labels={'createdBy': 'igd-controller'})
 def totalBytesSent(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetTotalBytesSent().get("NewTotalBytesSent"))
 
 
-@kopf.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'upnp-nat-controller'})
+@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
+           labels={'createdBy': 'igd-controller'})
 def totalBytesReceived(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetTotalBytesReceived().get("NewTotalBytesReceived"))
 
 
-@kopf.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'upnp-nat-controller'})
+@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
+           labels={'createdBy': 'igd-controller'})
 def totalPacketsSent(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetTotalPacketsSent().get("NewTotalPacketsSent"))
 
 
-@kopf.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'upnp-nat-controller'})
+@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
+           labels={'createdBy': 'igd-controller'})
 def totalPacketsReceived(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetTotalPacketsReceived().get("NewTotalPacketsReceived"))
 
 
-@kopf.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'upnp-nat-controller'})
+@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
+           labels={'createdBy': 'igd-controller'})
 def portMappings(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     port_mappings = []
