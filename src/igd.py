@@ -90,7 +90,7 @@ def ip(memo: Memo, **_):
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
 @kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
-def externalIPAddress(memo: Memo, **_):
+def externalIpAddress(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return igd.GetExternalIPAddress().get("NewExternalIPAddress")
 
