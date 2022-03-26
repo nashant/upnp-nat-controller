@@ -10,7 +10,7 @@ from upnpy.ssdp.SSDPDevice import SSDPDevice
 from upnpy.exceptions import SOAPError
 
 from utils import get_device
-from const import IGD_ARGS, IGD_NAME
+from const import IGD_ARGS, IGD_NAME, IGD_LABELS, IGD_TIMER
 
 class PortMapping(BaseModel):
     remoteHost: Optional[str]
@@ -79,72 +79,71 @@ def delete_igd(**_):
     api = get_kube_api()
     api.delete_cluster_custom_object(*IGD_ARGS, IGD_NAME)
 
-
-@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'igd-controller'})
+@kopf.on.create('internetgatewaydevices', **IGD_LABELS)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def ip(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return igd.dev.host
 
 
-@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'igd-controller'})
+@kopf.on.create('internetgatewaydevices', **IGD_LABELS)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def externalIPAddress(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return igd.GetExternalIPAddress().get("NewExternalIPAddress")
 
 
-@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'igd-controller'})
+@kopf.on.create('internetgatewaydevices', **IGD_LABELS)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def friendlyName(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     igd.dev.friendly_name
 
 
-@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'igd-controller'})
+@kopf.on.create('internetgatewaydevices', **IGD_LABELS)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def connectionStatus(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return igd.GetStatusInfo().get("NewConnectionStatus")
 
 
-@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'igd-controller'})
+@kopf.on.create('internetgatewaydevices', **IGD_LABELS)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def uptime(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetStatusInfo().get("NewUptime"))
 
 
-@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'igd-controller'})
+@kopf.on.create('internetgatewaydevices', **IGD_LABELS)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def totalBytesSent(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetTotalBytesSent().get("NewTotalBytesSent"))
 
 
-@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'igd-controller'})
+@kopf.on.create('internetgatewaydevices', **IGD_LABELS)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def totalBytesReceived(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetTotalBytesReceived().get("NewTotalBytesReceived"))
 
 
-@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'igd-controller'})
+@kopf.on.create('internetgatewaydevices', **IGD_LABELS)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def totalPacketsSent(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetTotalPacketsSent().get("NewTotalPacketsSent"))
 
 
-@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'igd-controller'})
+@kopf.on.create('internetgatewaydevices', **IGD_LABELS)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def totalPacketsReceived(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetTotalPacketsReceived().get("NewTotalPacketsReceived"))
 
 
-@kopf.on.timer('internetgatewaydevices', interval=10, initial_delay=60,
-           labels={'createdBy': 'igd-controller'})
+@kopf.on.create('internetgatewaydevices', **IGD_LABELS)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def portMappings(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     port_mappings = []
