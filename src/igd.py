@@ -10,7 +10,7 @@ from upnpy.ssdp.SSDPDevice import SSDPDevice
 from upnpy.exceptions import SOAPError
 
 from utils import get_device
-
+from const import IGD_ARGS, IGD_NAME
 
 class PortMapping(BaseModel):
     remoteHost: Optional[str]
@@ -48,16 +48,16 @@ def get_kube_api() -> CustomObjectsApi:
     return client.CustomObjectsApi()
 
 
-IGD_ARGS = ("crd.nashes.uk", "v1alpha1", "internetgatewaydevices")
-IGD_NAME = "igd-device"
-
 def get_or_create_igd() -> None:
     api = get_kube_api()
     try:
         api.get_cluster_custom_object(*IGD_ARGS, IGD_NAME)
     except ApiException as e:
-        print(e)
+        if e.status != 404:
+            raise
         body = {
+            "apiVersion": "crd.nashes.uk/v1alpha1",
+            "kind": "InternetGatewayDevice",
             "metadata": {
                 "name": IGD_NAME,
                 "labels": {
