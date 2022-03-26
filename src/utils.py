@@ -17,11 +17,14 @@ def advertise_udp(meta: Meta, **_):
     return advertise_proto(meta.annotations, 'udp')
 
 
-def get_svc() -> SSDPDevice.Service:
+def get_device() -> SSDPDevice:
     upnp = UPnP()
     if upnp.discover() == 0:
         return None
-    device: SSDPDevice = upnp.get_igd()
+    return upnp.get_igd()
+
+def get_svc() -> SSDPDevice.Service:
+    device = get_device()
     svcs = device.get_services()
     return next(filter(lambda s: 'AddPortMapping' in s.actions, svcs), None)
 
