@@ -23,6 +23,7 @@ def get_device() -> SSDPDevice:
         return None
     return upnp.get_igd()
 
+
 def get_svc() -> SSDPDevice.Service:
     device = get_device()
     svcs = device.get_services()
