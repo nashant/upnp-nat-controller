@@ -3,6 +3,7 @@ import kopf
 from kopf import Memo, Meta, Spec
 from kubernetes import config, client
 from kubernetes.client import CustomObjectsApi
+from kubernetes.client.exceptions import ApiException
 from pydantic import BaseModel
 from typing import Optional
 from upnpy.ssdp.SSDPDevice import SSDPDevice
@@ -54,7 +55,8 @@ def get_or_create_igd() -> None:
     api = get_kube_api()
     try:
         api.get_cluster_custom_object(*IGD_ARGS, IGD_NAME)
-    except:
+    except ApiException as e:
+        print(e)
         body = {
             "metadata": {
                 "name": IGD_NAME,
@@ -63,7 +65,7 @@ def get_or_create_igd() -> None:
                 }
             }
         }
-        api.create_cluster_custom_object(*IGD_ARGS, {}, body)
+        api.create_cluster_custom_object(*IGD_ARGS, body)
 
 
 @kopf.on.startup()
