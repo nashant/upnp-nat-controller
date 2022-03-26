@@ -147,7 +147,7 @@ def totalPacketsReceived(memo: Memo, **_):
 def portMappings(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     port_mappings = []
-    pm_index = 0
+    i = 0
     while True:
         try:
             pm = igd.GetGenericPortMappingEntry(NewPortMappingIndex=pm_index)
