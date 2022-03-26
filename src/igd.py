@@ -1,6 +1,7 @@
 import kopf
+import uuid
 
-from kopf import Memo, Meta, Spec
+from kopf import Memo
 from kubernetes import config, client
 from kubernetes.client import CustomObjectsApi
 from kubernetes.client.exceptions import ApiException
@@ -48,36 +49,30 @@ def get_kube_api() -> CustomObjectsApi:
     return client.CustomObjectsApi()
 
 
-def get_or_create_igd() -> None:
+def create_igd() -> None:
     api = get_kube_api()
-    try:
-        api.get_cluster_custom_object(*IGD_ARGS, IGD_NAME)
-    except ApiException as e:
-        if e.status != 404:
-            raise
-        body = {
-            "apiVersion": "crd.nashes.uk/v1alpha1",
-            "kind": "InternetGatewayDevice",
-            "metadata": {
-                "name": IGD_NAME,
-                "labels": {
-                    "createdBy": "igd-controller"
-                }
+    uid = uuid.uuid1().hex
+    body = {
+        "apiVersion": "crd.nashes.uk/v1alpha1",
+        "kind": "InternetGatewayDevice",
+        "metadata": {
+            "name": f"{IGD_NAME}-{uid}",
+            "labels": {
+                "createdBy": "igd-controller"
             }
         }
-        api.create_cluster_custom_object(*IGD_ARGS, body)
+    }
+    api.create_cluster_custom_object(*IGD_ARGS, body)
 
 
 @kopf.on.startup()
 def set_igd(memo: Memo, **_):
-    memo.run_timers = True
     memo["igd"] = IGD(get_device())
-    get_or_create_igd()
+    create_igd()
 
 
 @kopf.on.cleanup()
 def delete_igd(memo: Memo, **_):
-    memo.run_timers = False
     api = get_kube_api()
     api.delete_cluster_custom_object(*IGD_ARGS, IGD_NAME)
 
@@ -87,70 +82,70 @@ def run_timers(memo: Memo, **_):
 
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
-@kopf.on.timer('internetgatewaydevices', **IGD_TIMER, when=run_timers)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def ip(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return igd.dev.host
 
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
-@kopf.on.timer('internetgatewaydevices', **IGD_TIMER, when=run_timers)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def externalIPAddress(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return igd.GetExternalIPAddress().get("NewExternalIPAddress")
 
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
-@kopf.on.timer('internetgatewaydevices', **IGD_TIMER, when=run_timers)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def friendlyName(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return igd.dev.friendly_name
 
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
-@kopf.on.timer('internetgatewaydevices', **IGD_TIMER, when=run_timers)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def connectionStatus(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return igd.GetStatusInfo().get("NewConnectionStatus")
 
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
-@kopf.on.timer('internetgatewaydevices', **IGD_TIMER, when=run_timers)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def uptime(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetStatusInfo().get("NewUptime"))
 
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
-@kopf.on.timer('internetgatewaydevices', **IGD_TIMER, when=run_timers)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def totalBytesSent(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetTotalBytesSent().get("NewTotalBytesSent"))
 
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
-@kopf.on.timer('internetgatewaydevices', **IGD_TIMER, when=run_timers)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def totalBytesReceived(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetTotalBytesReceived().get("NewTotalBytesReceived"))
 
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
-@kopf.on.timer('internetgatewaydevices', **IGD_TIMER, when=run_timers)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def totalPacketsSent(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetTotalPacketsSent().get("NewTotalPacketsSent"))
 
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
-@kopf.on.timer('internetgatewaydevices', **IGD_TIMER, when=run_timers)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def totalPacketsReceived(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return int(igd.GetTotalPacketsReceived().get("NewTotalPacketsReceived"))
 
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
-@kopf.on.timer('internetgatewaydevices', **IGD_TIMER, when=run_timers)
+@kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
 def portMappings(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     port_mappings = []
