@@ -19,7 +19,7 @@ def advertise_udp(meta: Meta, **_):
 
 def get_device() -> SSDPDevice:
     upnp = UPnP()
-    if upnp.discover() == 0:
+    if upnp.discover(2, ST='urn:schemas-upnp-org:device:InternetGatewayDevice:1') == []:
         return None
     return upnp.get_igd()
 
