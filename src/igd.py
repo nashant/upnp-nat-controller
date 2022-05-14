@@ -1,7 +1,7 @@
 import kopf
 import uuid
 
-from kopf import Memo
+from kopf import Logger, Memo
 from kubernetes import config, client
 from kubernetes.client import CustomObjectsApi
 from kubernetes.client.exceptions import ApiException
@@ -83,7 +83,7 @@ def run_timers(memo: Memo, **_):
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
 @kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
-def ip(memo: Memo, **_):
+def ip(logger: Logger, memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
     return igd.dev.host
 
