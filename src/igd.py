@@ -49,8 +49,7 @@ def get_kube_api() -> CustomObjectsApi:
     return client.CustomObjectsApi()
 
 
-def create_igd(name) -> None:
-    api = get_kube_api()
+def create_igd(api, name) -> None:
     body = {
         "apiVersion": "crd.nashes.uk/v1alpha1",
         "kind": "InternetGatewayDevice",
@@ -65,16 +64,16 @@ def create_igd(name) -> None:
 
 
 @kopf.on.startup()
-def set_igd(memo: Memo, **_):
+def reset_igd(memo: Memo, **_):
+    api = get_kube_api()
+
+    igds = api.list_cluster_custom_object.get("items", [])
+    for igd in igds:
+        api.delete_cluster_custom_object(*IGD_ARGS, igd["metadata"]["name"])
+
     memo["igd"] = IGD(get_device())
     memo["igd_name"] = f"{IGD_NAME}-{uuid.uuid1().hex}"
-    create_igd(memo["igd_name"])
-
-
-@kopf.on.cleanup()
-def delete_igd(memo: Memo, **_):
-    api = get_kube_api()
-    api.delete_cluster_custom_object(*IGD_ARGS, memo["igd_name"])
+    create_igd(api, memo["igd_name"])
 
 
 def run_timers(memo: Memo, **_):
