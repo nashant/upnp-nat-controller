@@ -67,8 +67,8 @@ def create_igd(api, name) -> None:
 def reset_igd(memo: Memo, **_):
     api = get_kube_api()
 
-    igds = api.list_cluster_custom_object.get("items", [])
-    for igd in igds:
+    igds = api.list_cluster_custom_object(*IGD_ARGS)
+    for igd in igds.get("items", []):
         api.delete_cluster_custom_object(*IGD_ARGS, igd["metadata"]["name"])
 
     memo["igd"] = IGD(get_device())
