@@ -89,16 +89,19 @@ def ip(logger: Logger, memo: Memo, **_):
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
 @kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
-def externalIpAddress(memo: Memo, **_):
+def friendlyName(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
-    return igd.GetExternalIPAddress().get("NewExternalIPAddress")
+    return igd.dev.friendly_name
 
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
 @kopf.on.timer('internetgatewaydevices', **IGD_TIMER)
-def friendlyName(memo: Memo, **_):
+def externalIpAddress(memo: Memo, **_):
     igd: IGD = memo.get("igd", None)
-    return igd.dev.friendly_name
+    try:
+        return igd.GetExternalIPAddress().get("NewExternalIPAddress")
+    except urllib.error.URLError:
+        memo["igd"] = IGD(get_device())
 
 
 @kopf.on.create('internetgatewaydevices', **IGD_LABELS)
