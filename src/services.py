@@ -26,7 +26,7 @@ def create_lb(logger: Logger, memo: Memo, meta: Meta, spec: Spec, status: Status
         svc=get_svc()
     )
     lb.advertise(logger)
-    memo.lb = lb
+    memo["lb"] = lb
 
 
 @kopf.on.update('services', **KOPF_LB_PARAMS)
@@ -48,7 +48,7 @@ def update_lb(logger: Logger, memo: Memo, meta: Meta, old: Spec, new: Spec, anno
     )
     old_lb.deadvertise(logger)
     new_lb.advertise(logger)
-    memo.lb = new_lb
+    memo["lb"] = new_lb
 
 
 
@@ -63,4 +63,4 @@ def delete_lb(logger: Logger, meta: Meta, spec: Spec, annotations: Annotations, 
         svc=get_svc()
     )
     lb.deadvertise(logger)
-    del memo.lb
+    del memo["lb"]
