@@ -1,7 +1,7 @@
 import kopf
 import uuid
 
-from kopf import Logger, Memo
+from kopf import Logger, Memo, Meta, Status
 from kubernetes import config, client
 from kubernetes.client import CustomObjectsApi
 from kubernetes.client.exceptions import ApiException
@@ -165,7 +165,10 @@ def portMappings(memo: Memo, **_):
 
 
 @kopf.on.field('internetgatewaydevices', field='status.portMappings', **IGD_LABELS)
-def ensurePortMappings(logger: Logger, memo: Memo, **_):
+def ensurePortMappings(logger: Logger, memo: Memo, meta: Meta, status: Status, **_):
     if 'lb' in memo:
         logger.info(f"Ensuring loadbalancer ports are advertised")
         memo.lb.advertise(logger)
+    annotations["upnp-nat-controller/portMappings"] = ",".join([
+        f"{pm['internalClient']}:{pm['internalPort']}/pm['protocol']}->{pm['externalPort']}" for pm in status["portMappings"] if pm["enabled"]|
+    ])
