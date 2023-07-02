@@ -163,7 +163,9 @@ def portMappings(memo: Memo, **_):
             raise(e)
     return port_mappings
 
+
 @kopf.on.field('internetgatewaydevices', field='status.portMappings', **IGD_LABELS)
 def ensurePortMappings(logger: Logger, memo: Memo, **_):
-    logger.info(f"Ensuring loadbalancer ports are advertised")
-    memo.lb.advertise(logger)
+    if 'lb' in memo:
+        logger.info(f"Ensuring loadbalancer ports are advertised")
+        memo.lb.advertise(logger)
