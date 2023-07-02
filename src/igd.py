@@ -169,6 +169,7 @@ def ensurePortMappings(logger: Logger, memo: Memo, meta: Meta, status: Status, *
     if 'lb' in memo:
         logger.info(f"Ensuring loadbalancer ports are advertised")
         memo.lb.advertise(logger)
-    annotations["upnp-nat-controller/portMappings"] = ",".join([
-        f"{pm['internalClient']}:{pm['internalPort']}/pm['protocol']}->{pm['externalPort']}" for pm in status["portMappings"] if pm["enabled"]|
-    ])
+    if "portMappings" in status:
+        annotations["upnp-nat-controller/portMappings"] = ",".join([
+            f"{pm['internalClient']}:{pm['internalPort']}/pm['protocol']}->{pm['externalPort']}" for pm in status["portMappings"] if pm["enabled"]|
+        ])
