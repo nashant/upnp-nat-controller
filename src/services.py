@@ -1,6 +1,6 @@
 import kopf
 
-from kopf import Logger, Meta, Spec, Status, Annotations
+from kopf import Logger, Memo, Meta, Spec, Status, Annotations
 
 from const import KOPF_LB_PARAMS
 from utils import get_svc
