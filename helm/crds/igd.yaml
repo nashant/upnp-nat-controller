@@ -29,10 +29,6 @@ spec:
       type: string
       description: The external ip of the IGD
       jsonPath: .status.externalIpAddress
-    - name: PORT MAPPINGS
-      type: string
-      description: The external ip of the IGD
-      jsonPath: .metadata.annotations['upnp-nat-controller/portMappings']
     - name: UPTIME
       type: string
       description: The name of the IGD
