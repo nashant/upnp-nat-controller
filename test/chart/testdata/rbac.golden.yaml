@@ -1,0 +1,86 @@
+---
+# Source: upnp-nat-controller/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: upnp-nat-controller
+  labels:
+    helm.sh/chart: upnp-nat-controller-0.1.0
+    app.kubernetes.io/name: upnp-nat-controller
+    app.kubernetes.io/instance: upnp-nat-controller
+    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/managed-by: Helm
+rules:
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list", "watch", "update", "patch"]
+- apiGroups: [""]
+  resources: ["services/finalizers"]
+  verbs: ["update"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+- apiGroups: ["gateway.nashes.uk"]
+  resources: ["internetgatewaydevices"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+- apiGroups: ["gateway.nashes.uk"]
+  resources: ["internetgatewaydevices/status"]
+  verbs: ["get", "update", "patch"]
+---
+# Source: upnp-nat-controller/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: upnp-nat-controller
+  labels:
+    helm.sh/chart: upnp-nat-controller-0.1.0
+    app.kubernetes.io/name: upnp-nat-controller
+    app.kubernetes.io/instance: upnp-nat-controller
+    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/managed-by: Helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: upnp-nat-controller
+subjects:
+- kind: ServiceAccount
+  name: upnp-nat-controller
+  namespace: upnp
+---
+# Source: upnp-nat-controller/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: upnp-nat-controller-leader-election
+  namespace: upnp
+  labels:
+    helm.sh/chart: upnp-nat-controller-0.1.0
+    app.kubernetes.io/name: upnp-nat-controller
+    app.kubernetes.io/instance: upnp-nat-controller
+    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/managed-by: Helm
+rules:
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+# Source: upnp-nat-controller/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: upnp-nat-controller-leader-election
+  namespace: upnp
+  labels:
+    helm.sh/chart: upnp-nat-controller-0.1.0
+    app.kubernetes.io/name: upnp-nat-controller
+    app.kubernetes.io/instance: upnp-nat-controller
+    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/managed-by: Helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: upnp-nat-controller-leader-election
+subjects:
+- kind: ServiceAccount
+  name: upnp-nat-controller
+  namespace: upnp

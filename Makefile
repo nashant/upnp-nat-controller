@@ -9,7 +9,8 @@ SETUP_ENVTEST_VERSION ?= release-0.22
 LOCALBIN ?= $(CURDIR)/bin
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 SETUP_ENVTEST ?= $(LOCALBIN)/setup-envtest
-GOLANGCI_LINT ?= golangci-lint
+GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
+GOLANGCI_LINT_VERSION ?= v2.8.0
 
 UNIT_PKGS = ./internal/annotations/... ./internal/mapping/... ./internal/upnp/... ./internal/health/...
 
@@ -33,7 +34,7 @@ vet:
 	go vet ./...
 
 .PHONY: lint
-lint:
+lint: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) run ./...
 
 .PHONY: test-unit
@@ -58,6 +59,9 @@ envtest: $(SETUP_ENVTEST)
 
 $(CONTROLLER_GEN):
 	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)
+
+$(GOLANGCI_LINT):
+	GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 $(SETUP_ENVTEST):
 	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION)

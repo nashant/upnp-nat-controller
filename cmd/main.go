@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -35,6 +36,7 @@ type Options struct {
 	MetricsAddr      string
 	ProbeAddr        string
 	LeaderElect      bool
+	LeaderElectionNS string
 	IGDURL           *url.URL
 	ResyncInterval   time.Duration
 	LeaseDuration    uint32
@@ -43,6 +45,9 @@ type Options struct {
 	RateLimit        float64
 	RateBurst        int
 	Zap              zap.Options
+
+	// skipNameValidation lets tests start the manager more than once per process.
+	skipNameValidation bool
 }
 
 func parseFlags(args []string) (Options, error) {
@@ -56,6 +61,7 @@ func parseFlags(args []string) (Options, error) {
 	fs.StringVar(&o.MetricsAddr, "metrics-bind-address", ":8080", "Address the metrics endpoint binds to.")
 	fs.StringVar(&o.ProbeAddr, "health-probe-bind-address", ":8081", "Address the health probe endpoint binds to.")
 	fs.BoolVar(&o.LeaderElect, "leader-elect", true, "Enable leader election.")
+	fs.StringVar(&o.LeaderElectionNS, "leader-election-namespace", "", "Namespace for the leader election lease (default: the pod's namespace).")
 	fs.StringVar(&igdURL, "igd-url", "", "Root device description URL of the router; skips SSDP discovery.")
 	fs.DurationVar(&o.ResyncInterval, "resync-interval", 30*time.Second, "How often every managed Service is reconciled.")
 	fs.Int64Var(&lease, "lease-duration", 3600, "Default port mapping lease in seconds (0 = permanent).")
@@ -100,13 +106,14 @@ func main() {
 		os.Exit(2)
 	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&o.Zap)))
-	if err := run(ctrl.SetupSignalHandler(), ctrl.GetConfigOrDie(), o); err != nil {
+	if err := run(ctrl.SetupSignalHandler(), ctrl.GetConfigOrDie(), o, crmetrics.Registry); err != nil {
 		ctrl.Log.Error(err, "manager exited")
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, cfg *rest.Config, o Options) error {
+// run starts the manager; the controller's metrics are registered with reg.
+func run(ctx context.Context, cfg *rest.Config, o Options, reg prometheus.Registerer) error {
 	log := ctrl.Log.WithName("setup")
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
@@ -117,11 +124,12 @@ func run(ctx context.Context, cfg *rest.Config, o Options) error {
 	}
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: o.MetricsAddr},
-		HealthProbeBindAddress: o.ProbeAddr,
-		LeaderElection:         o.LeaderElect,
-		LeaderElectionID:       "upnp-nat-controller.nashes.uk",
+		Scheme:                  scheme,
+		Metrics:                 metricsserver.Options{BindAddress: o.MetricsAddr},
+		HealthProbeBindAddress:  o.ProbeAddr,
+		LeaderElection:          o.LeaderElect,
+		LeaderElectionID:        "upnp-nat-controller.nashes.uk",
+		LeaderElectionNamespace: o.LeaderElectionNS,
 		// Mappings are left on the router at shutdown (NFR-OPS-5); release
 		// the lease so a replacement takes over quickly.
 		LeaderElectionReleaseOnCancel: true,
@@ -130,7 +138,7 @@ func run(ctx context.Context, cfg *rest.Config, o Options) error {
 		return fmt.Errorf("create manager: %w", err)
 	}
 
-	m := metrics.New(crmetrics.Registry)
+	m := metrics.New(reg)
 	router := metrics.Instrument(upnp.New(upnp.Config{
 		IGDURL:      o.IGDURL,
 		SOAPTimeout: o.SOAPTimeout,
@@ -145,7 +153,7 @@ func run(ctx context.Context, cfg *rest.Config, o Options) error {
 		ResyncInterval: o.ResyncInterval, RetryInterval: 10 * time.Second, IPWaitInterval: 5 * time.Second,
 		DefaultLease: o.LeaseDuration, FinalizerTimeout: o.FinalizerTimeout,
 	}
-	if err := r.SetupWithManager(mgr, resync, controller.Options{}); err != nil {
+	if err := r.SetupWithManager(mgr, resync, controller.Options{SkipNameValidation: &o.skipNameValidation}); err != nil {
 		return fmt.Errorf("set up Service controller: %w", err)
 	}
 	poller := &ctl.IGDPoller{

@@ -1,24 +1,42 @@
-# Default values for adguard-ingress-operator.
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
-
 image:
   repository: nashant/upnp-nat-controller
-  pullPolicy: Always
+  pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: latest
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+controller:
+  # Root device description URL of the router. Empty: discover with SSDP.
+  igdURL: ""
+  resyncInterval: 30s
+  # Default port mapping lease in seconds; 0 asks the router for a permanent mapping.
+  leaseDuration: 3600
+  soapTimeout: 5s
+  finalizerTimeout: 10m
+  leaderElect: true
+  logLevel: info
+  extraArgs: []
+
+# The pod uses the node's network (SSDP multicast), so these ports are
+# opened on the node.
+ports:
+  metrics: 8080
+  health: 8081
+
+metrics:
+  service:
+    enabled: true
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
 serviceAccount:
-  # Specifies whether a service account should be created
   create: true
-  # Annotations to add to the service account
   annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template
   name: ""
 
 rbac:
@@ -28,24 +46,22 @@ rbac:
 
 podAnnotations: {}
 
-podSecurityContext: {}
-  # fsGroup: 2000
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
   readOnlyRootFilesystem: true
-  runAsUser: 1000
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
 
-resources: {}
-  # We usually recommend not to specify default resources and to leave this as a conscious
-  # choice for the user. This also increases chances charts run on environments with little
-  # resources, such as Minikube. If you do want to specify resources, uncomment the following
-  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
 
 nodeSelector: {}
 

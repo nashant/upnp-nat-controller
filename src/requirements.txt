@@ -1,4 +1,0 @@
-kopf
-kubernetes
-pydantic
-UPnPy
