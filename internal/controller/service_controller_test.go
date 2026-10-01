@@ -623,3 +623,58 @@ func TestReconcile_UDPOnly(t *testing.T) { // D8, S6
 		t.Fatalf("got %+v", ms)
 	}
 }
+
+func TestReconcile_DeletingWithKopfFinalizer_CleansLegacyMappings(t *testing.T) { // FR-SVC-10/11, review I1
+	h := newSvcHarness(t)
+	ns := newNamespace(t)
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "stuck", Finalizers: []string{LegacyFinalizer},
+			Annotations: map[string]string{annotations.TCPEnabled: "true", annotations.TCPPorts: "443"}},
+		Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer, Ports: []corev1.ServicePort{tcpPort(443)}},
+	}
+	if err := k8s.Create(bg, svc); err != nil {
+		t.Fatal(err)
+	}
+	foreign := upnp.PortMapping{Protocol: corev1.ProtocolTCP, ExternalPort: 80, InternalPort: 80, InternalClient: "192.168.1.50", Enabled: true, Description: "Xbox"}
+	h.router.Seed(
+		upnp.PortMapping{Protocol: corev1.ProtocolTCP, ExternalPort: 443, InternalPort: 443, InternalClient: lbIP, Enabled: true, Description: ns + "/stuck"},
+		foreign,
+	)
+	if err := k8s.Delete(bg, svc); err != nil { // stuck Terminating on the kopf finalizer
+		t.Fatal(err)
+	}
+	h.router.SetError("List", upnp.ErrUnreachable)
+	h.reconcile(t, svc)
+	if !controllerutil.ContainsFinalizer(getSvc(t, svc), LegacyFinalizer) {
+		t.Fatal("kopf finalizer released before its mappings were cleaned up")
+	}
+	h.router.SetError("List", nil)
+	h.reconcile(t, svc)
+	if ms := h.router.Mappings(); len(ms) != 1 || ms[0] != foreign {
+		t.Fatalf("mappings %+v, want only the foreign one", ms)
+	}
+	if err := k8s.Get(bg, client.ObjectKeyFromObject(svc), &corev1.Service{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("Service not gone: %v", err)
+	}
+}
+
+func TestReconcile_DeletingWithKopfFinalizer_RouterDownTimesOut(t *testing.T) { // review I1 + FR-SVC-9
+	h := newSvcHarness(t)
+	ns := newNamespace(t)
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "stuck", Finalizers: []string{LegacyFinalizer}},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer, Ports: []corev1.ServicePort{tcpPort(443)}},
+	}
+	if err := k8s.Create(bg, svc); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8s.Delete(bg, svc); err != nil {
+		t.Fatal(err)
+	}
+	h.router.SetError("List", upnp.ErrUnreachable)
+	h.clk.Step(11 * time.Minute)
+	h.reconcile(t, svc)
+	if err := k8s.Get(bg, client.ObjectKeyFromObject(svc), &corev1.Service{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("Service not released after timeout: %v", err)
+	}
+}

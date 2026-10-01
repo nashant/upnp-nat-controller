@@ -111,6 +111,10 @@ func TestChart_Deployment(t *testing.T) { // M9, NFR-OPS-1/2/6/7, NFR-SEC-1
 	if !spec.HostNetwork || spec.DNSPolicy != corev1.DNSClusterFirstWithHostNet {
 		t.Errorf("hostNetwork=%v dnsPolicy=%s", spec.HostNetwork, spec.DNSPolicy)
 	}
+	if d.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
+		// hostNetwork defaults hostPort to containerPort, so a surge pod never fits on the node.
+		t.Errorf("strategy %q, want Recreate", d.Spec.Strategy.Type)
+	}
 	if *d.Spec.Replicas != 1 {
 		t.Errorf("replicas %d", *d.Spec.Replicas)
 	}

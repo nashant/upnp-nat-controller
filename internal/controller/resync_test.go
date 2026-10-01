@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"sort"
 	"testing"
 	"time"
@@ -8,6 +9,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clocktesting "k8s.io/utils/clock/testing"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/nashant/upnp-nat-controller/internal/annotations"
 )
@@ -74,5 +77,50 @@ func TestRelevant(t *testing.T) {
 		if got := relevant(&corev1.Service{ObjectMeta: c.meta}); got != c.want {
 			t.Errorf("%s: relevant=%v want %v", name, got, c.want)
 		}
+	}
+}
+
+func TestReconcile_HeartbeatCallsOnPassOnly(t *testing.T) { // review I2, NFR-OPS-1
+	h := newSvcHarness(t)
+	passes := 0
+	h.r.OnPass = func() { passes++ }
+	res, err := h.r.Reconcile(bg, reconcile.Request{NamespacedName: HeartbeatKey})
+	if err != nil || res != (reconcile.Result{}) || passes != 1 {
+		t.Fatalf("res %+v err %v passes %d", res, err, passes)
+	}
+	if routerCalls(h.router) != 0 {
+		t.Fatal("heartbeat touched the router")
+	}
+}
+
+func TestHeartbeat_EmitsEveryInterval(t *testing.T) { // review I2
+	clk := clocktesting.NewFakeClock(time.Unix(1_000_000, 0))
+	hb := NewHeartbeat(clk, 30*time.Second)
+	ctx, cancel := context.WithCancel(bg)
+	defer cancel()
+	go func() { _ = hb.Start(ctx) }()
+	recv := func() bool {
+		select {
+		case <-hb.ch:
+			return true
+		case <-time.After(2 * time.Second):
+			return false
+		}
+	}
+	if !recv() {
+		t.Fatal("no heartbeat at start")
+	}
+	for !clk.HasWaiters() {
+		time.Sleep(time.Millisecond)
+	}
+	clk.Step(30 * time.Second)
+	if !recv() {
+		t.Fatal("no heartbeat after interval")
+	}
+	if !hb.NeedLeaderElection() {
+		t.Fatal("heartbeat must follow the leader-only controller")
+	}
+	if got := hb.requests(ctx, nil); len(got) != 1 || got[0].NamespacedName != HeartbeatKey {
+		t.Fatalf("requests %v", got)
 	}
 }

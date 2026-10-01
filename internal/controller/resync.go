@@ -2,8 +2,11 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -69,4 +72,49 @@ func (r *Resync) requests(ctx context.Context, _ client.Object) []reconcile.Requ
 		}
 	}
 	return out
+}
+
+// HeartbeatKey is a request the Service reconciler answers without doing
+// any work, so liveness can tell the workqueue is draining even when no
+// Service is managed.
+var HeartbeatKey = types.NamespacedName{Name: "upnp-nat-controller.heartbeat"}
+
+// Heartbeat enqueues HeartbeatKey every interval. It is a leader-only
+// manager.Runnable, like the Service controller it feeds.
+type Heartbeat struct {
+	clock    clock.WithTicker
+	interval time.Duration
+	ch       chan event.GenericEvent
+}
+
+// NewHeartbeat returns a heartbeat that fires every interval.
+func NewHeartbeat(clk clock.WithTicker, interval time.Duration) *Heartbeat {
+	return &Heartbeat{clock: clk, interval: interval, ch: make(chan event.GenericEvent, 1)}
+}
+
+// NeedLeaderElection implements manager.LeaderElectionRunnable.
+func (h *Heartbeat) NeedLeaderElection() bool { return true }
+
+// Start emits a heartbeat now and then every interval until ctx is done.
+func (h *Heartbeat) Start(ctx context.Context) error {
+	for {
+		select {
+		case h.ch <- event.GenericEvent{Object: &corev1.Service{}}:
+		default:
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-h.clock.After(h.interval):
+		}
+	}
+}
+
+// Source is the watch source to register with the Service controller.
+func (h *Heartbeat) Source() source.Source {
+	return source.Channel(h.ch, handler.EnqueueRequestsFromMapFunc(h.requests))
+}
+
+func (h *Heartbeat) requests(context.Context, client.Object) []reconcile.Request {
+	return []reconcile.Request{{NamespacedName: HeartbeatKey}}
 }

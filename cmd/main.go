@@ -144,22 +144,28 @@ func run(ctx context.Context, cfg *rest.Config, o Options, reg prometheus.Regist
 		SOAPTimeout: o.SOAPTimeout,
 		Limiter:     rate.NewLimiter(rate.Limit(o.RateLimit), o.RateBurst),
 	}), m)
-	tracker := health.New(clock.RealClock{})
+	clk := clock.RealClock{}
+	rec := mgr.GetEventRecorderFor("upnp-nat-controller")
+	tracker := health.New(clk)
 	resync := ctl.NewResync(mgr.GetClient())
+	heartbeat := ctl.NewHeartbeat(clk, o.ResyncInterval)
+	if err := mgr.Add(heartbeat); err != nil {
+		return fmt.Errorf("add heartbeat: %w", err)
+	}
 
 	r := &ctl.ServiceReconciler{
-		K8s: mgr.GetClient(), UPnP: router, Recorder: mgr.GetEventRecorderFor("upnp-nat-controller"),
-		Clock: clock.RealClock{}, Metrics: m, OnPass: func() { tracker.Beat(o.ResyncInterval) },
+		K8s: mgr.GetClient(), UPnP: router, Recorder: rec,
+		Clock: clk, Metrics: m, OnPass: func() { tracker.Beat("service-reconciler", o.ResyncInterval) },
 		ResyncInterval: o.ResyncInterval, RetryInterval: 10 * time.Second, IPWaitInterval: 5 * time.Second,
 		DefaultLease: o.LeaseDuration, FinalizerTimeout: o.FinalizerTimeout,
 	}
-	if err := r.SetupWithManager(mgr, resync, controller.Options{SkipNameValidation: &o.skipNameValidation}); err != nil {
+	if err := r.SetupWithManager(mgr, controller.Options{SkipNameValidation: &o.skipNameValidation}, resync.Source(), heartbeat.Source()); err != nil {
 		return fmt.Errorf("set up Service controller: %w", err)
 	}
 	poller := &ctl.IGDPoller{
-		K8s: mgr.GetClient(), UPnP: router, Recorder: mgr.GetEventRecorderFor("upnp-nat-controller"),
-		Clock: clock.RealClock{}, Resync: resync, Metrics: m, Log: ctrl.Log.WithName("igd"),
-		OnPass: tracker.Beat,
+		K8s: mgr.GetClient(), UPnP: router, Recorder: rec,
+		Clock: clk, Resync: resync, Metrics: m, Log: ctrl.Log.WithName("igd"),
+		OnPass: func(next time.Duration) { tracker.Beat("igd-poller", next) },
 	}
 	if err := mgr.Add(poller); err != nil {
 		return fmt.Errorf("add IGD poller: %w", err)

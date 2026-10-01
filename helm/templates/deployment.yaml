@@ -6,6 +6,9 @@ metadata:
     {{- include "upnp-nat-controller.labels" . | nindent 4 }}
 spec:
   replicas: 1
+  # hostNetwork makes the ports hostPorts, so old and new pods cannot overlap on a node.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "upnp-nat-controller.selectorLabels" . | nindent 6 }}

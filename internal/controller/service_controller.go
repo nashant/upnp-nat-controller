@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/nashant/upnp-nat-controller/internal/annotations"
 	"github.com/nashant/upnp-nat-controller/internal/mapping"
@@ -71,13 +72,22 @@ type ServiceReconciler struct {
 	waiting map[types.UID]bool
 	// seen holds the mappings each Service had on the router at its last
 	// pass, to tell a drift repair from a first add.
-	seen map[types.UID]map[string]bool
+	seen map[types.UID]map[portKey]bool
 }
 
-func mappingKey(proto corev1.Protocol, port uint16) string { return fmt.Sprintf("%s/%d", proto, port) }
+type portKey struct {
+	proto corev1.Protocol
+	port  uint16
+}
 
 // Reconcile implements reconcile.Reconciler.
 func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	if req.NamespacedName == HeartbeatKey {
+		if r.OnPass != nil {
+			r.OnPass()
+		}
+		return ctrl.Result{}, nil
+	}
 	res, result, err := r.reconcile(ctx, req)
 	if err != nil {
 		result = resultError
@@ -113,8 +123,14 @@ func (r *ServiceReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 			"Service has %s annotations but type %s; only LoadBalancer Services are mapped", "advertise.upnp", svc.Spec.Type)
 	}
 	if !managed || !isLB || !svc.DeletionTimestamp.IsZero() {
-		if !controllerutil.ContainsFinalizer(&svc, Finalizer) {
-			return ctrl.Result{}, resultSkippedIf(managed), nil
+		// A Service deleted while it still carries the kopf finalizer gets
+		// the same cleanup as ours: it may have Python-era mappings.
+		if !controllerutil.ContainsFinalizer(&svc, Finalizer) && !controllerutil.ContainsFinalizer(&svc, LegacyFinalizer) {
+			result := ""
+			if managed {
+				result = resultSkipped
+			}
+			return ctrl.Result{}, result, nil
 		}
 		return r.cleanup(ctx, logger, &svc)
 	}
@@ -156,13 +172,6 @@ func (r *ServiceReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{RequeueAfter: r.ResyncInterval}, resultSuccess, nil
 }
 
-func resultSkippedIf(managed bool) string {
-	if managed {
-		return resultSkipped
-	}
-	return ""
-}
-
 // ingressIP returns the first IPv4 ingress address. It emits one
 // WaitingForIP event per Service while there is no ingress at all.
 func (r *ServiceReconciler) ingressIP(svc *corev1.Service) (string, bool) {
@@ -198,12 +207,14 @@ func (r *ServiceReconciler) apply(ctx context.Context, logger logr.Logger, svc *
 	r.mu.Lock()
 	prevSeen := r.seen[svc.UID]
 	r.mu.Unlock()
-	nowSeen := map[string]bool{}
+	onRouter := make(map[portKey]bool, len(actual))
+	for _, a := range actual {
+		onRouter[portKey{a.Protocol, a.ExternalPort}] = true
+	}
+	nowSeen := map[portKey]bool{}
 	for _, d := range desired {
-		for _, a := range actual {
-			if a.Protocol == d.Protocol && a.ExternalPort == d.ExternalPort {
-				nowSeen[mappingKey(d.Protocol, d.ExternalPort)] = true
-			}
+		if k := (portKey{d.Protocol, d.ExternalPort}); onRouter[k] {
+			nowSeen[k] = true
 		}
 	}
 
@@ -216,7 +227,7 @@ func (r *ServiceReconciler) apply(ctx context.Context, logger logr.Logger, svc *
 			continue
 		case mapping.Add, mapping.Renew:
 			err = r.UPnP.Add(ctx, m)
-			if err == nil && act.Kind == mapping.Add && prevSeen[mappingKey(m.Protocol, m.ExternalPort)] {
+			if err == nil && act.Kind == mapping.Add && prevSeen[portKey{m.Protocol, m.ExternalPort}] {
 				r.Metrics.DriftRepairs.Inc()
 				logger.Info("re-added missing port mapping", "protocol", m.Protocol, "externalPort", m.ExternalPort)
 			} else if err == nil && act.Kind == mapping.Add {
@@ -225,10 +236,7 @@ func (r *ServiceReconciler) apply(ctx context.Context, logger logr.Logger, svc *
 				logger.V(1).Info("renewed port mapping", "protocol", m.Protocol, "externalPort", m.ExternalPort)
 			}
 		case mapping.Replace:
-			err = r.UPnP.Delete(ctx, act.Existing.Protocol, act.Existing.ExternalPort)
-			if errors.Is(err, upnp.ErrNoSuchEntry) {
-				err = nil
-			}
+			err = r.deleteIfPresent(ctx, act.Existing.Protocol, act.Existing.ExternalPort)
 			if err == nil {
 				err = r.UPnP.Add(ctx, m)
 			}
@@ -238,15 +246,12 @@ func (r *ServiceReconciler) apply(ctx context.Context, logger logr.Logger, svc *
 			}
 		case mapping.Delete:
 			m = *act.Existing
-			err = r.UPnP.Delete(ctx, m.Protocol, m.ExternalPort)
-			if errors.Is(err, upnp.ErrNoSuchEntry) {
-				err = nil
-			}
+			err = r.deleteIfPresent(ctx, m.Protocol, m.ExternalPort)
 			if err == nil {
 				logger.Info("deleted port mapping", "protocol", m.Protocol, "externalPort", m.ExternalPort)
 			}
 		}
-		k := mappingKey(m.Protocol, m.ExternalPort)
+		k := portKey{m.Protocol, m.ExternalPort}
 		switch {
 		case err == nil && act.Kind != mapping.Delete:
 			nowSeen[k] = true
@@ -265,6 +270,14 @@ func (r *ServiceReconciler) apply(ctx context.Context, logger logr.Logger, svc *
 	return false
 }
 
+// deleteIfPresent deletes a mapping; one already gone is not an error.
+func (r *ServiceReconciler) deleteIfPresent(ctx context.Context, proto corev1.Protocol, port uint16) error {
+	if err := r.UPnP.Delete(ctx, proto, port); err != nil && !errors.Is(err, upnp.ErrNoSuchEntry) {
+		return err
+	}
+	return nil
+}
+
 func (r *ServiceReconciler) conflict(svc *corev1.Service, m upnp.PortMapping, existing *upnp.PortMapping) {
 	r.Metrics.PortConflicts.Inc()
 	holder := "another client"
@@ -274,11 +287,11 @@ func (r *ServiceReconciler) conflict(svc *corev1.Service, m upnp.PortMapping, ex
 	r.Recorder.Eventf(svc, corev1.EventTypeWarning, "PortConflict", "router port %s/%d is already mapped to %s", m.Protocol, m.ExternalPort, holder)
 }
 
-func (r *ServiceReconciler) remember(uid types.UID, seen map[string]bool) {
+func (r *ServiceReconciler) remember(uid types.UID, seen map[portKey]bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.seen == nil {
-		r.seen = map[types.UID]map[string]bool{}
+		r.seen = map[types.UID]map[portKey]bool{}
 	}
 	r.seen[uid] = seen
 }
@@ -311,6 +324,7 @@ func (r *ServiceReconciler) cleanup(ctx context.Context, logger logr.Logger, svc
 			"router unreachable for %s; removing finalizer, port mappings for this Service may remain on the router", r.FinalizerTimeout)
 	}
 	controllerutil.RemoveFinalizer(svc, Finalizer)
+	controllerutil.RemoveFinalizer(svc, LegacyFinalizer)
 	if err := r.K8s.Update(ctx, svc); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, "", fmt.Errorf("remove finalizer: %w", err)
 	}
@@ -319,9 +333,10 @@ func (r *ServiceReconciler) cleanup(ctx context.Context, logger logr.Logger, svc
 }
 
 // removeLegacyMetadata strips the Python controller's kopf finalizer and
-// annotations (FR-SVC-10).
+// annotations (FR-SVC-10). On a Service being deleted the finalizer is
+// kept until cleanup has removed its mappings.
 func (r *ServiceReconciler) removeLegacyMetadata(ctx context.Context, svc *corev1.Service) error {
-	changed := controllerutil.RemoveFinalizer(svc, LegacyFinalizer)
+	changed := svc.DeletionTimestamp.IsZero() && controllerutil.RemoveFinalizer(svc, LegacyFinalizer)
 	for _, a := range legacyAnnotations {
 		if _, ok := svc.Annotations[a]; ok {
 			delete(svc.Annotations, a)
@@ -337,12 +352,15 @@ func (r *ServiceReconciler) removeLegacyMetadata(ctx context.Context, svc *corev
 	return nil
 }
 
-// SetupWithManager registers the reconciler for Services and resync events.
-func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager, resync *Resync, opts controller.Options) error {
-	return ctrl.NewControllerManagedBy(mgr).
+// SetupWithManager registers the reconciler for Services plus extra
+// sources (resync, heartbeat).
+func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager, opts controller.Options, sources ...source.Source) error {
+	b := ctrl.NewControllerManagedBy(mgr).
 		Named("service").
 		For(&corev1.Service{}, builder.WithPredicates(predicate.NewPredicateFuncs(relevant))).
-		WatchesRawSource(resync.Source()).
-		WithOptions(opts).
-		Complete(r)
+		WithOptions(opts)
+	for _, src := range sources {
+		b = b.WatchesRawSource(src)
+	}
+	return b.Complete(r)
 }

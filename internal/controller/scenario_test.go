@@ -120,7 +120,7 @@ func startScenario(t *testing.T, o scenarioOpts) *scenario {
 		o.tweak(r)
 	}
 	resync := NewResync(mgr.GetClient())
-	if err := r.SetupWithManager(mgr, resync, controller.Options{}); err != nil {
+	if err := r.SetupWithManager(mgr, controller.Options{}, resync.Source()); err != nil {
 		t.Fatal(err)
 	}
 	cleanupIGD(t)
