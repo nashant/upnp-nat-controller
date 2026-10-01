@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -362,5 +363,39 @@ func TestIGD_ListFailureKeepsPortMappings(t *testing.T) {
 	h.poll(t)
 	if n := len(getIGD(t).Status.PortMappings); n != 1 {
 		t.Fatalf("portMappings %d after failed List, want 1", n)
+	}
+}
+
+func TestIGD_Start_PollsOnIntervalAndReportsPass(t *testing.T) { // NFR-OPS-1
+	h := newIGDHarness(t)
+	var passes atomic.Int32
+	h.p.OnPass = func(next time.Duration) {
+		if next != 30*time.Second {
+			t.Errorf("OnPass next=%v", next)
+		}
+		passes.Add(1)
+	}
+	ctx, cancel := context.WithCancel(bg)
+	done := make(chan error)
+	go func() { done <- h.p.Start(ctx) }()
+	waitFor := func(n int32) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for passes.Load() < n {
+			if time.Now().After(deadline) {
+				t.Fatalf("passes %d, want %d", passes.Load(), n)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	waitFor(1)
+	for !h.clk.HasWaiters() {
+		time.Sleep(time.Millisecond)
+	}
+	h.clk.Step(30 * time.Second)
+	waitFor(2)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

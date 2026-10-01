@@ -55,6 +55,8 @@ type IGDPoller struct {
 	Resync   ResyncTrigger
 	Metrics  *metrics.Metrics
 	Log      logr.Logger
+	// OnPass, if set, is called after every poll with the delay until the next.
+	OnPass func(next time.Duration)
 
 	prev *observation
 	// lostRouter is set when a poll fails, so the next good poll resyncs.
@@ -71,6 +73,9 @@ func (p *IGDPoller) Start(ctx context.Context) error {
 		if err != nil {
 			p.Log.Error(err, "IGD poll failed")
 			next = defaultPollingInterval
+		}
+		if p.OnPass != nil {
+			p.OnPass(next)
 		}
 		select {
 		case <-ctx.Done():
