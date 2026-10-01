@@ -42,19 +42,11 @@ type collectingRecorder struct {
 	events []string
 }
 
-func (c *collectingRecorder) Event(obj runtime.Object, typ, reason, msg string) {
+func (c *collectingRecorder) Eventf(obj, _ runtime.Object, typ, reason, _, note string, args ...any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	o, _ := meta.Accessor(obj)
-	c.events = append(c.events, fmt.Sprintf("%s %s %s/%s %s", typ, reason, o.GetNamespace(), o.GetName(), msg))
-}
-
-func (c *collectingRecorder) Eventf(obj runtime.Object, typ, reason, f string, args ...any) {
-	c.Event(obj, typ, reason, fmt.Sprintf(f, args...))
-}
-
-func (c *collectingRecorder) AnnotatedEventf(obj runtime.Object, _ map[string]string, typ, reason, f string, args ...any) {
-	c.Eventf(obj, typ, reason, f, args...)
+	c.events = append(c.events, fmt.Sprintf("%s %s %s/%s %s", typ, reason, o.GetNamespace(), o.GetName(), fmt.Sprintf(note, args...)))
 }
 
 func (c *collectingRecorder) has(reason string) bool {

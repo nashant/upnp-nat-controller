@@ -89,7 +89,3 @@ type InternetGatewayDeviceList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []InternetGatewayDevice `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&InternetGatewayDevice{}, &InternetGatewayDeviceList{})
-}

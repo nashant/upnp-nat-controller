@@ -13,7 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -50,7 +50,7 @@ type observation struct {
 type IGDPoller struct {
 	K8s      client.Client
 	UPnP     upnp.Client
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 	Clock    clock.WithTicker
 	Resync   ResyncTrigger
 	Metrics  *metrics.Metrics
@@ -165,14 +165,14 @@ func (p *IGDPoller) recordStatus(ctx context.Context, igd *gatewayv1alpha1.Inter
 	resync := p.lostRouter
 	if prev := p.prev; prev != nil {
 		if st.Uptime < prev.uptime || st.Location != prev.location {
-			p.Recorder.Eventf(igd, corev1.EventTypeWarning, "RouterRestarted",
+			p.Recorder.Eventf(igd, nil, corev1.EventTypeWarning, "RouterRestarted", "Poll",
 				"router restarted (uptime %ds -> %ds, location %s -> %s)", prev.uptime, st.Uptime, prev.location, st.Location)
 			p.Metrics.RouterRestarts.Inc()
 			p.Log.Info("router restarted", "location", st.Location, "uptime", st.Uptime)
 			resync = true
 		}
 		if prev.externalIP != "" && st.ExternalIP != prev.externalIP {
-			p.Recorder.Eventf(igd, corev1.EventTypeNormal, "ExternalIPChanged", "external IP changed from %s to %s", prev.externalIP, st.ExternalIP)
+			p.Recorder.Eventf(igd, nil, corev1.EventTypeNormal, "ExternalIPChanged", "Poll", "external IP changed from %s to %s", prev.externalIP, st.ExternalIP)
 			p.Log.Info("external IP changed", "from", prev.externalIP, "to", st.ExternalIP)
 			resync = true
 		}

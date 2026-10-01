@@ -12,7 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -55,7 +55,7 @@ const (
 type ServiceReconciler struct {
 	K8s      client.Client
 	UPnP     upnp.Client
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 	Clock    clock.PassiveClock
 	Metrics  *metrics.Metrics
 	// OnPass, if set, is called after every reconcile that ran to completion.
@@ -119,7 +119,7 @@ func (r *ServiceReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	managed := annotations.IsManaged(svc.Annotations)
 	isLB := svc.Spec.Type == corev1.ServiceTypeLoadBalancer
 	if managed && !isLB {
-		r.Recorder.Eventf(&svc, corev1.EventTypeWarning, "NotLoadBalancer",
+		r.Recorder.Eventf(&svc, nil, corev1.EventTypeWarning, "NotLoadBalancer", "Reconcile",
 			"Service has %s annotations but type %s; only LoadBalancer Services are mapped", "advertise.upnp", svc.Spec.Type)
 	}
 	if !managed || !isLB || !svc.DeletionTimestamp.IsZero() {
@@ -137,7 +137,7 @@ func (r *ServiceReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	spec, err := annotations.Parse(svc.Annotations, svc.Spec.Ports, r.DefaultLease)
 	if err != nil {
-		r.Recorder.Eventf(&svc, corev1.EventTypeWarning, "InvalidAnnotations", "%v", err)
+		r.Recorder.Eventf(&svc, nil, corev1.EventTypeWarning, "InvalidAnnotations", "Reconcile", "%v", err)
 		return ctrl.Result{}, resultInvalid, nil
 	}
 
@@ -185,7 +185,7 @@ func (r *ServiceReconciler) ingressIP(svc *corev1.Service) (string, bool) {
 		}
 	}
 	if len(ingress) > 0 {
-		r.Recorder.Event(svc, corev1.EventTypeWarning, "NoIPv4Ingress", "LoadBalancer ingress has no IPv4 address; UPnP mappings need one")
+		r.Recorder.Eventf(svc, nil, corev1.EventTypeWarning, "NoIPv4Ingress", "Reconcile", "LoadBalancer ingress has no IPv4 address; UPnP mappings need one")
 		return "", false
 	}
 	r.mu.Lock()
@@ -195,7 +195,7 @@ func (r *ServiceReconciler) ingressIP(svc *corev1.Service) (string, bool) {
 	}
 	if !r.waiting[svc.UID] {
 		r.waiting[svc.UID] = true
-		r.Recorder.Event(svc, corev1.EventTypeNormal, "WaitingForIP", "waiting for a LoadBalancer IP")
+		r.Recorder.Eventf(svc, nil, corev1.EventTypeNormal, "WaitingForIP", "Reconcile", "waiting for a LoadBalancer IP")
 	}
 	return "", false
 }
@@ -263,7 +263,7 @@ func (r *ServiceReconciler) apply(ctx context.Context, logger logr.Logger, svc *
 		case errors.Is(err, upnp.ErrConflict):
 			r.conflict(svc, m, nil)
 		default:
-			r.Recorder.Eventf(svc, corev1.EventTypeWarning, "MappingFailed", "%s %s/%d: %v", act.Kind, m.Protocol, m.ExternalPort, err)
+			r.Recorder.Eventf(svc, nil, corev1.EventTypeWarning, "MappingFailed", "Reconcile", "%s %s/%d: %v", act.Kind, m.Protocol, m.ExternalPort, err)
 		}
 	}
 	r.remember(svc.UID, nowSeen)
@@ -284,7 +284,7 @@ func (r *ServiceReconciler) conflict(svc *corev1.Service, m upnp.PortMapping, ex
 	if existing != nil {
 		holder = fmt.Sprintf("%s (%q)", existing.InternalClient, existing.Description)
 	}
-	r.Recorder.Eventf(svc, corev1.EventTypeWarning, "PortConflict", "router port %s/%d is already mapped to %s", m.Protocol, m.ExternalPort, holder)
+	r.Recorder.Eventf(svc, nil, corev1.EventTypeWarning, "PortConflict", "Reconcile", "router port %s/%d is already mapped to %s", m.Protocol, m.ExternalPort, holder)
 }
 
 func (r *ServiceReconciler) remember(uid types.UID, seen map[portKey]bool) {
@@ -320,7 +320,7 @@ func (r *ServiceReconciler) cleanup(ctx context.Context, logger logr.Logger, svc
 		if !deleting || r.Clock.Since(svc.DeletionTimestamp.Time) < r.FinalizerTimeout {
 			return ctrl.Result{RequeueAfter: r.RetryInterval}, resultUnreachable, nil
 		}
-		r.Recorder.Eventf(svc, corev1.EventTypeWarning, "OrphanedMappings",
+		r.Recorder.Eventf(svc, nil, corev1.EventTypeWarning, "OrphanedMappings", "Reconcile",
 			"router unreachable for %s; removing finalizer, port mappings for this Service may remain on the router", r.FinalizerTimeout)
 	}
 	controllerutil.RemoveFinalizer(svc, Finalizer)

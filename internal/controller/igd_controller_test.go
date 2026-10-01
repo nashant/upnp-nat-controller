@@ -13,7 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	evts "k8s.io/client-go/tools/events"
 	clocktesting "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -31,7 +31,7 @@ func (c *countingTrigger) TriggerResync() { c.n.Add(1) }
 type igdHarness struct {
 	p       *IGDPoller
 	router  *fake.Client
-	rec     *record.FakeRecorder
+	rec     *evts.FakeRecorder
 	clk     *clocktesting.FakeClock
 	trigger *countingTrigger
 	m       *metrics.Metrics
@@ -43,7 +43,7 @@ func newIGDHarness(t *testing.T) *igdHarness {
 	t.Cleanup(func() { cleanupIGD(t) })
 	h := &igdHarness{
 		router:  fake.New(),
-		rec:     record.NewFakeRecorder(100),
+		rec:     evts.NewFakeRecorder(100),
 		clk:     clocktesting.NewFakeClock(time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)),
 		trigger: &countingTrigger{},
 		m:       metrics.New(prometheus.NewRegistry()),
@@ -86,7 +86,7 @@ func condStatus(igd *gatewayv1alpha1.InternetGatewayDevice, typ string) metav1.C
 	return c.Status
 }
 
-func events(rec *record.FakeRecorder) []string {
+func drainEvents(rec *evts.FakeRecorder) []string {
 	var out []string
 	for {
 		select {
@@ -225,7 +225,7 @@ func TestIGD_DoubleNAT_PublicExternalIPFalse(t *testing.T) { // FR-IGD-3, S16
 func TestIGD_UptimeDecrease_EmitsRouterRestarted_TriggersResync(t *testing.T) { // FR-DISC-5
 	h := newIGDHarness(t)
 	h.poll(t)
-	events(h.rec)
+	drainEvents(h.rec)
 	h.router.UpdateStatus(func(s *upnp.DeviceStatus) { s.Uptime = 1030 })
 	h.clk.Step(30 * time.Second)
 	h.poll(t)
@@ -235,7 +235,7 @@ func TestIGD_UptimeDecrease_EmitsRouterRestarted_TriggersResync(t *testing.T) { 
 	h.router.UpdateStatus(func(s *upnp.DeviceStatus) { s.Uptime = 5 })
 	h.clk.Step(30 * time.Second)
 	h.poll(t)
-	if !hasEvent(events(h.rec), "RouterRestarted") {
+	if !hasEvent(drainEvents(h.rec), "RouterRestarted") {
 		t.Fatal("no RouterRestarted event")
 	}
 	if n := h.trigger.n.Load(); n != 1 {
@@ -249,11 +249,11 @@ func TestIGD_UptimeDecrease_EmitsRouterRestarted_TriggersResync(t *testing.T) { 
 func TestIGD_LocationChange_EmitsRouterRestarted(t *testing.T) { // FR-DISC-5, S2
 	h := newIGDHarness(t)
 	h.poll(t)
-	events(h.rec)
+	drainEvents(h.rec)
 	h.router.UpdateStatus(func(s *upnp.DeviceStatus) { s.Location = "http://192.168.1.1:5001/rootDesc.xml"; s.Uptime = 2000 })
 	h.clk.Step(30 * time.Second)
 	h.poll(t)
-	if !hasEvent(events(h.rec), "RouterRestarted") || h.trigger.n.Load() != 1 {
+	if !hasEvent(drainEvents(h.rec), "RouterRestarted") || h.trigger.n.Load() != 1 {
 		t.Fatal("location change not detected")
 	}
 }
@@ -261,11 +261,11 @@ func TestIGD_LocationChange_EmitsRouterRestarted(t *testing.T) { // FR-DISC-5, S
 func TestIGD_ExternalIPChange_EmitsEvent_TriggersResync(t *testing.T) { // FR-DISC-5, S14
 	h := newIGDHarness(t)
 	h.poll(t)
-	events(h.rec)
+	drainEvents(h.rec)
 	h.router.UpdateStatus(func(s *upnp.DeviceStatus) { s.ExternalIP = "81.2.69.200"; s.Uptime = 1030 })
 	h.clk.Step(30 * time.Second)
 	h.poll(t)
-	evs := events(h.rec)
+	evs := drainEvents(h.rec)
 	if !hasEvent(evs, "ExternalIPChanged") || hasEvent(evs, "RouterRestarted") {
 		t.Fatalf("events %v", evs)
 	}
@@ -288,7 +288,7 @@ func TestIGD_RestartDetectedAcrossControllerRestart(t *testing.T) { // FR-DISC-5
 	if _, err := h2.Poll(bg); err != nil {
 		t.Fatal(err)
 	}
-	if !hasEvent(events(h.rec), "RouterRestarted") {
+	if !hasEvent(drainEvents(h.rec), "RouterRestarted") {
 		t.Fatal("restart during controller downtime not detected")
 	}
 }

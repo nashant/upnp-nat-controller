@@ -12,7 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	evts "k8s.io/client-go/tools/events"
 	clocktesting "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -81,7 +81,7 @@ func managedLB(t *testing.T, ns, name, ip string) *corev1.Service {
 type svcHarness struct {
 	r      *ServiceReconciler
 	router *fake.Client
-	rec    *record.FakeRecorder
+	rec    *evts.FakeRecorder
 	clk    *clocktesting.FakeClock
 	m      *metrics.Metrics
 }
@@ -90,7 +90,7 @@ func newSvcHarness(t *testing.T) *svcHarness {
 	t.Helper()
 	h := &svcHarness{
 		router: fake.New(),
-		rec:    record.NewFakeRecorder(100),
+		rec:    evts.NewFakeRecorder(100),
 		clk:    clocktesting.NewFakeClock(time.Now()),
 		m:      metrics.New(prometheus.NewRegistry()),
 	}
@@ -159,7 +159,7 @@ func TestReconcile_NotLoadBalancer_WarningEvent(t *testing.T) { // FR-SVC-3, D13
 	if res := h.reconcile(t, svc); res != (reconcile.Result{}) {
 		t.Fatalf("result %+v, want no requeue", res)
 	}
-	if !hasEvent(events(h.rec), "NotLoadBalancer") {
+	if !hasEvent(drainEvents(h.rec), "NotLoadBalancer") {
 		t.Fatal("no NotLoadBalancer event")
 	}
 	if n := routerCalls(h.router); n != 0 {
@@ -176,7 +176,7 @@ func TestReconcile_NoIngressIP_RequeuesAfter5s(t *testing.T) { // FR-SVC-4
 			t.Fatalf("result %+v, want RequeueAfter 5s", res)
 		}
 	}
-	evs := events(h.rec)
+	evs := drainEvents(h.rec)
 	n := 0
 	for _, e := range evs {
 		if hasEvent([]string{e}, "WaitingForIP") {
@@ -199,7 +199,7 @@ func TestReconcile_HostnameOnlyIngress_Warns(t *testing.T) { // FR-SVC-2
 	if res := h.reconcile(t, svc); res.RequeueAfter == 0 {
 		t.Fatalf("want requeue, got %+v", res)
 	}
-	if !hasEvent(events(h.rec), "NoIPv4Ingress") {
+	if !hasEvent(drainEvents(h.rec), "NoIPv4Ingress") {
 		t.Fatal("no NoIPv4Ingress event")
 	}
 }
@@ -345,7 +345,7 @@ func TestReconcile_Conflict_EventAndOtherPortsMapped(t *testing.T) { // FR-SVC-6
 	if res := h.reconcile(t, svc); res.RequeueAfter != 30*time.Second {
 		t.Fatalf("got %+v", res)
 	}
-	if !hasEvent(events(h.rec), "PortConflict") {
+	if !hasEvent(drainEvents(h.rec), "PortConflict") {
 		t.Fatal("no PortConflict event")
 	}
 	ms := h.router.Mappings()
@@ -363,7 +363,7 @@ func TestReconcile_AddRaceConflict_Event(t *testing.T) { // FR-SVC-6: 718 from A
 	svc := managedLB(t, ns, "lb", lbIP)
 	h.router.SetError("Add", upnp.ErrConflict)
 	h.reconcile(t, svc)
-	if !hasEvent(events(h.rec), "PortConflict") {
+	if !hasEvent(drainEvents(h.rec), "PortConflict") {
 		t.Fatal("no PortConflict event")
 	}
 }
@@ -379,7 +379,7 @@ func TestReconcile_OtherRouterError_EventAndContinue(t *testing.T) {
 	if h.router.Count("Add") != 2 {
 		t.Fatalf("adds %d, want both attempted", h.router.Count("Add"))
 	}
-	if !hasEvent(events(h.rec), "MappingFailed") {
+	if !hasEvent(drainEvents(h.rec), "MappingFailed") {
 		t.Fatal("no MappingFailed event")
 	}
 }
@@ -393,7 +393,7 @@ func TestReconcile_InvalidAnnotations_WarningEvent(t *testing.T) { // FR-ANN-*
 	if res := h.reconcile(t, svc); res != (reconcile.Result{}) {
 		t.Fatalf("got %+v, want no requeue", res)
 	}
-	if !hasEvent(events(h.rec), "InvalidAnnotations") {
+	if !hasEvent(drainEvents(h.rec), "InvalidAnnotations") {
 		t.Fatal("no InvalidAnnotations event")
 	}
 	if routerCalls(h.router) != 0 {
@@ -476,7 +476,7 @@ func TestReconcile_TypeChangedToClusterIP_CleansUp(t *testing.T) { // FR-SVC-9
 	if len(h.router.Mappings()) != 0 || controllerutil.ContainsFinalizer(getSvc(t, svc), Finalizer) {
 		t.Fatal("not cleaned up")
 	}
-	if !hasEvent(events(h.rec), "NotLoadBalancer") {
+	if !hasEvent(drainEvents(h.rec), "NotLoadBalancer") {
 		t.Fatal("no NotLoadBalancer event")
 	}
 }
@@ -523,7 +523,7 @@ func TestReconcile_Delete_RouterDown_TimeoutReleasesFinalizer(t *testing.T) { //
 	if err := k8s.Get(bg, client.ObjectKeyFromObject(svc), &corev1.Service{}); !apierrors.IsNotFound(err) {
 		t.Fatalf("Service not gone after timeout: %v", err)
 	}
-	if !hasEvent(events(h.rec), "OrphanedMappings") {
+	if !hasEvent(drainEvents(h.rec), "OrphanedMappings") {
 		t.Fatal("no OrphanedMappings event")
 	}
 }
@@ -572,7 +572,7 @@ func TestReconcile_RemovesLegacyKopfFinalizerAndAnnotations(t *testing.T) { // F
 	if ms := h.router.Mappings(); len(ms) != 1 || ms[0].Description != mapping.OwnerDescription(ns, "public-traefik") {
 		t.Fatalf("legacy mapping not adopted: %+v", ms)
 	}
-	if hasEvent(events(h.rec), "PortConflict") {
+	if hasEvent(drainEvents(h.rec), "PortConflict") {
 		t.Fatal("PortConflict against our own legacy mapping")
 	}
 }

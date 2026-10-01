@@ -145,7 +145,7 @@ func run(ctx context.Context, cfg *rest.Config, o Options, reg prometheus.Regist
 		Limiter:     rate.NewLimiter(rate.Limit(o.RateLimit), o.RateBurst),
 	}), m)
 	clk := clock.RealClock{}
-	rec := mgr.GetEventRecorderFor("upnp-nat-controller")
+	rec := mgr.GetEventRecorder("upnp-nat-controller")
 	tracker := health.New(clk)
 	resync := ctl.NewResync(mgr.GetClient())
 	heartbeat := ctl.NewHeartbeat(clk, o.ResyncInterval)

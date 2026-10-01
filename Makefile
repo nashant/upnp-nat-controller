@@ -1,18 +1,15 @@
-GOTOOLCHAIN ?= local
-export GOTOOLCHAIN
-
-IMG ?= nashant/upnp-nat-controller:dev
-ENVTEST_K8S_VERSION ?= 1.34.x
-CONTROLLER_TOOLS_VERSION ?= v0.19.0
-SETUP_ENVTEST_VERSION ?= release-0.22
+IMG ?= ghcr.io/nashant/upnp-nat-controller:dev
+ENVTEST_K8S_VERSION ?= 1.37.x
+CONTROLLER_TOOLS_VERSION ?= v0.22.0
+SETUP_ENVTEST_VERSION ?= release-0.25
 
 LOCALBIN ?= $(CURDIR)/bin
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 SETUP_ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
-GOLANGCI_LINT_VERSION ?= v2.8.0
+GOLANGCI_LINT_VERSION ?= v2.14.0
 
-UNIT_PKGS = ./internal/annotations/... ./internal/mapping/... ./internal/upnp/... ./internal/health/...
+UNIT_PKGS = ./internal/annotations/... ./internal/mapping/... ./internal/upnp/... ./internal/health/... ./internal/ipclass/... ./internal/metrics/...
 
 .PHONY: all
 all: build

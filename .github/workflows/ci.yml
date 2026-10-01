@@ -17,8 +17,8 @@ permissions:
   contents: read
 
 env:
-  GOLANGCI_LINT_VERSION: v2.8.0
-  KUBECONFORM_VERSION: v0.6.7
+  GOLANGCI_LINT_VERSION: v2.14.0
+  KUBECONFORM_VERSION: v0.8.0
 
 jobs:
   test:
