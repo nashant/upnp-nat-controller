@@ -356,3 +356,11 @@ func TestFakeIGD_ControlURLHostOverride(t *testing.T) {
 		t.Fatalf("control host %q", h)
 	}
 }
+
+func TestFakeIGD_WithoutTrafficCounters(t *testing.T) {
+	f := fakeigd.New(t, fakeigd.WithoutTrafficCounters())
+	loc, _ := url.Parse(f.URL())
+	if _, err := internetgateway2.NewWANCommonInterfaceConfig1ClientsByURLCtx(ctx, loc); err == nil {
+		t.Fatal("WANCommonInterfaceConfig advertised")
+	}
+}

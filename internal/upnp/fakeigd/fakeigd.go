@@ -80,6 +80,7 @@ type Server struct {
 	services      []Service
 	controlHost   string
 	onlyPermanent bool
+	noCommon      bool
 	table         map[key]entry
 	started       time.Time
 	externalIP    string
@@ -109,6 +110,9 @@ func WithControlHost(host string) Option { return func(s *Server) { s.controlHos
 
 // OnlyPermanentLeases makes AddPortMapping with a non-zero lease fail with 725.
 func OnlyPermanentLeases() Option { return func(s *Server) { s.onlyPermanent = true } }
+
+// WithoutTrafficCounters omits the WANCommonInterfaceConfig service.
+func WithoutTrafficCounters() Option { return func(s *Server) { s.noCommon = true } }
 
 // Stopped creates the server without starting it; call Start.
 func Stopped() Option { return func(s *Server) { s.srv = nil; s.addr = "stopped" } }
@@ -374,7 +378,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serviceForPath(p string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if p == ctlPath(commonIfConfig) {
+	if p == ctlPath(commonIfConfig) && !s.noCommon {
 		return commonIfConfig, true
 	}
 	for _, svc := range s.services {
@@ -567,6 +571,10 @@ func (s *Server) description() string {
 		conns.WriteString(svc(string(c), id))
 	}
 	v := s.deviceVersion
+	common := svc(commonIfConfig, "WANCommonIFC1")
+	if s.noCommon {
+		common = ""
+	}
 	return fmt.Sprintf(`<?xml version="1.0"?>
 <root xmlns="urn:schemas-upnp-org:device-1-0">
 <specVersion><major>1</major><minor>1</minor></specVersion>
@@ -585,5 +593,5 @@ func (s *Server) description() string {
 </device></deviceList>
 </device></deviceList>
 </device>
-</root>`, v, svc(commonIfConfig, "WANCommonIFC1"), conns.String())
+</root>`, v, common, conns.String())
 }
