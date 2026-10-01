@@ -364,3 +364,18 @@ func TestFakeIGD_WithoutTrafficCounters(t *testing.T) {
 		t.Fatal("WANCommonInterfaceConfig advertised")
 	}
 }
+
+func TestFakeIGD_ClearMappingsKeepsUptime(t *testing.T) {
+	clk := clocktesting.NewFakeClock(time.Unix(1_000_000, 0))
+	f := fakeigd.New(t, fakeigd.WithClock(clk))
+	c := ipConn(t, f)
+	_ = add(t, c, 443, "172.16.1.2", "d", 0)
+	clk.Step(time.Minute)
+	f.ClearMappings()
+	if len(f.Mappings()) != 0 {
+		t.Fatal("not cleared")
+	}
+	if _, _, up, _ := c.GetStatusInfoCtx(ctx); up != 60 {
+		t.Fatalf("uptime %d, want 60", up)
+	}
+}

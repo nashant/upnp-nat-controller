@@ -210,6 +210,9 @@ func (s *Server) reset() {
 	s.started = s.clock.Now()
 }
 
+// ClearMappings empties the table without restarting (uptime continues).
+func (s *Server) ClearMappings() { s.mu.Lock(); s.table = map[key]entry{}; s.mu.Unlock() }
+
 // Restart simulates the UPnP daemon restarting on the same port: the table
 // is cleared, uptime resets and open connections are dropped.
 func (s *Server) Restart() {
