@@ -258,3 +258,15 @@ func FuzzParsePorts(f *testing.F) {
 		}
 	})
 }
+
+func TestSpec_ValidateLease(t *testing.T) { // review P4/R6: a lease shorter than two passes expires between renewals
+	for lease, ok := range map[uint32]bool{0: true, 61: true, 3600: true, 60: false, 1: false, 30: false} {
+		err := Spec{LeaseSeconds: lease}.ValidateLease(60)
+		if (err == nil) != ok {
+			t.Errorf("lease %d: err=%v, want ok=%v", lease, err, ok)
+		}
+		if err != nil && !strings.Contains(err.Error(), LeaseSeconds) {
+			t.Errorf("lease %d: error %q should name %s", lease, err, LeaseSeconds)
+		}
+	}
+}

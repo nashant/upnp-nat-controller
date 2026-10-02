@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -55,6 +56,8 @@ type IGDPoller struct {
 	Resync   ResyncTrigger
 	Metrics  *metrics.Metrics
 	Log      logr.Logger
+	// Names recognises this controller's mapping descriptions; zero means the defaults.
+	Names mapping.Descriptions
 	// OnPass, if set, is called after every poll with the delay until the next.
 	OnPass func(next time.Duration)
 
@@ -160,7 +163,7 @@ func (p *IGDPoller) recordUnreachable(s *gatewayv1alpha1.InternetGatewayDeviceSt
 func (p *IGDPoller) recordStatus(ctx context.Context, igd *gatewayv1alpha1.InternetGatewayDevice, s *gatewayv1alpha1.InternetGatewayDeviceStatus, st upnp.DeviceStatus, now time.Time) {
 	gen := igd.Generation
 	if p.prev == nil && igd.Status.Location != "" {
-		p.prev = &observation{uptime: uint32(igd.Status.Uptime), location: igd.Status.Location, externalIP: igd.Status.ExternalIP}
+		p.prev = &observation{uptime: clampUint32(igd.Status.Uptime), location: igd.Status.Location, externalIP: igd.Status.ExternalIP}
 	}
 	resync := p.lostRouter
 	if prev := p.prev; prev != nil {
@@ -212,7 +215,7 @@ func (p *IGDPoller) recordStatus(ctx context.Context, igd *gatewayv1alpha1.Inter
 	}
 
 	if list, err := p.UPnP.List(ctx); err == nil {
-		s.PortMappings = ownedMappings(list)
+		s.PortMappings = ownedMappings(names(p.Names), list)
 		p.Metrics.OwnedMappings.Set(float64(len(s.PortMappings)))
 	}
 
@@ -221,10 +224,10 @@ func (p *IGDPoller) recordStatus(ctx context.Context, igd *gatewayv1alpha1.Inter
 	}
 }
 
-func ownedMappings(list []upnp.PortMapping) []gatewayv1alpha1.PortMappingStatus {
+func ownedMappings(d mapping.Descriptions, list []upnp.PortMapping) []gatewayv1alpha1.PortMappingStatus {
 	var out []gatewayv1alpha1.PortMappingStatus
 	for _, m := range list {
-		ns, name, ok := mapping.ParseOwnerDescription(m.Description)
+		ns, name, ok := d.Parse(m.Description)
 		if !ok {
 			continue
 		}
@@ -254,4 +257,16 @@ func stable(s gatewayv1alpha1.InternetGatewayDeviceStatus) gatewayv1alpha1.Inter
 		s.PortMappings[i].LeaseDuration = 0
 	}
 	return s
+}
+
+// clampUint32 converts a status value, which anyone with write access to
+// the CR can set, without wrapping.
+func clampUint32(v int64) uint32 {
+	switch {
+	case v < 0:
+		return 0
+	case v > math.MaxUint32:
+		return math.MaxUint32
+	}
+	return uint32(v)
 }

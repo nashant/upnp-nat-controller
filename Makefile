@@ -1,5 +1,7 @@
 IMG ?= ghcr.io/nashant/upnp-nat-controller:dev
+# Bumped by hand with the Renovate "kubernetes" group:
 ENVTEST_K8S_VERSION ?= 1.37.x
+# renovate: datasource=github-releases depName=kubernetes-sigs/controller-tools
 CONTROLLER_TOOLS_VERSION ?= v0.22.0
 SETUP_ENVTEST_VERSION ?= release-0.25
 
@@ -7,6 +9,7 @@ LOCALBIN ?= $(CURDIR)/bin
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 SETUP_ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
+# renovate: datasource=github-releases depName=golangci/golangci-lint
 GOLANGCI_LINT_VERSION ?= v2.14.0
 
 UNIT_PKGS = ./internal/annotations/... ./internal/mapping/... ./internal/upnp/... ./internal/health/... ./internal/ipclass/... ./internal/metrics/...

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"net/url"
 	"sync"
@@ -238,13 +239,13 @@ func toProtocol(s string) (corev1.Protocol, bool) {
 // List implements Client. Entries with protocols other than TCP/UDP are skipped.
 func (c *GoUPnPClient) List(ctx context.Context) ([]PortMapping, error) {
 	var out []PortMapping
-	for i := 0; i <= 0xffff; i++ {
+	for i := uint16(0); ; i++ {
 		var m PortMapping
 		var proto string
 		err := c.do(ctx, func(ctx context.Context, d *device) error {
 			var err error
 			_, m.ExternalPort, proto, m.InternalPort, m.InternalClient, m.Enabled, m.Description, m.LeaseDuration, err =
-				d.conn.GetGenericPortMappingEntryCtx(ctx, uint16(i))
+				d.conn.GetGenericPortMappingEntryCtx(ctx, i)
 			return err
 		})
 		if errors.Is(err, ErrEndOfList) || errors.Is(err, ErrNoSuchEntry) {
@@ -256,6 +257,9 @@ func (c *GoUPnPClient) List(ctx context.Context) ([]PortMapping, error) {
 		var ok bool
 		if m.Protocol, ok = toProtocol(proto); ok {
 			out = append(out, m)
+		}
+		if i == math.MaxUint16 {
+			break
 		}
 	}
 	return out, nil

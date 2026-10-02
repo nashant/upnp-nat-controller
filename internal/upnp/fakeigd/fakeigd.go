@@ -6,9 +6,11 @@ package fakeigd
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -79,6 +81,7 @@ type Server struct {
 	deviceVersion int
 	services      []Service
 	controlHost   string
+	trafficHost   string
 	onlyPermanent bool
 	noCommon      bool
 	table         map[key]entry
@@ -107,6 +110,10 @@ func WithServices(svcs ...Service) Option { return func(s *Server) { s.services 
 
 // WithControlHost advertises control URLs on host instead of the server's own address.
 func WithControlHost(host string) Option { return func(s *Server) { s.controlHost = host } }
+
+// WithTrafficControlHost advertises only the WANCommonInterfaceConfig
+// control URL on host.
+func WithTrafficControlHost(host string) Option { return func(s *Server) { s.trafficHost = host } }
 
 // OnlyPermanentLeases makes AddPortMapping with a non-zero lease fail with 725.
 func OnlyPermanentLeases() Option { return func(s *Server) { s.onlyPermanent = true } }
@@ -144,7 +151,7 @@ func New(t testing.TB, opts ...Option) *Server {
 }
 
 func freeAddr(t testing.TB) string {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("fakeigd: %v", err)
 	}
@@ -172,7 +179,7 @@ func (s *Server) Start() {
 		err error
 	)
 	for i := 0; i < 50; i++ { // the port may linger briefly after Stop
-		if l, err = net.Listen("tcp", s.addr); err == nil {
+		if l, err = (&net.ListenConfig{}).Listen(context.Background(), "tcp", s.addr); err == nil {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -277,7 +284,14 @@ func (s *Server) AddMapping(m Mapping) {
 	s.put(m)
 }
 
+// maxDescription is what miniupnpd on pf keeps of a description: a rule
+// label of PF_RULE_LABEL_SIZE (64) bytes including the NUL.
+const maxDescription = 63
+
 func (s *Server) put(m Mapping) {
+	if len(m.Description) > maxDescription {
+		m.Description = m.Description[:maxDescription]
+	}
 	if m.Lease == 0 {
 		m.Lease = MaxLease
 	}
@@ -301,7 +315,7 @@ func (s *Server) live() []Mapping {
 			continue
 		}
 		m := e.m
-		m.Lease = uint32((e.expires.Sub(now) + time.Second - 1) / time.Second)
+		m.Lease = seconds(e.expires.Sub(now) + time.Second - 1)
 		out = append(out, m)
 	}
 	slices.SortFunc(out, func(a, b Mapping) int {
@@ -408,7 +422,7 @@ func (s *Server) handle(action string, a map[string]string) ([]kv, int) {
 	case "GetExternalIPAddress":
 		return []kv{{"NewExternalIPAddress", s.externalIP}}, 0
 	case "GetStatusInfo":
-		up := uint32(s.clock.Since(s.started) / time.Second)
+		up := seconds(s.clock.Since(s.started))
 		return []kv{{"NewConnectionStatus", s.connStatus}, {"NewLastConnectionError", "ERROR_NONE"}, {"NewUptime", strconv.FormatUint(uint64(up), 10)}}, 0
 	case "GetTotalBytesSent":
 		return []kv{{"NewTotalBytesSent", strconv.FormatUint(s.sent, 10)}}, 0
@@ -564,10 +578,11 @@ func (s *Server) description() string {
 	if s.controlHost != "" {
 		base = "http://" + s.controlHost
 	}
-	svc := func(t, id string) string {
+	svcOn := func(base, t, id string) string {
 		return fmt.Sprintf(`<service><serviceType>%s%s</serviceType><serviceId>urn:upnp-org:serviceId:%s</serviceId><SCPDURL>/scpd/%s.xml</SCPDURL><controlURL>%s%s</controlURL><eventSubURL>/evt/%s</eventSubURL></service>`,
 			serviceURNPrefix, t, id, id, base, ctlPath(t), id)
 	}
+	svc := func(t, id string) string { return svcOn(base, t, id) }
 	var conns strings.Builder
 	for _, c := range s.services {
 		id := strings.ReplaceAll(string(c), ":", "")
@@ -575,6 +590,9 @@ func (s *Server) description() string {
 	}
 	v := s.deviceVersion
 	common := svc(commonIfConfig, "WANCommonIFC1")
+	if s.trafficHost != "" {
+		common = svcOn("http://"+s.trafficHost, commonIfConfig, "WANCommonIFC1")
+	}
 	if s.noCommon {
 		common = ""
 	}
@@ -597,4 +615,16 @@ func (s *Server) description() string {
 </device></deviceList>
 </device>
 </root>`, v, common, conns.String())
+}
+
+// seconds converts d to whole seconds, clamped to the uint32 range.
+func seconds(d time.Duration) uint32 {
+	s := d / time.Second
+	switch {
+	case s < 0:
+		return 0
+	case s > math.MaxUint32:
+		return math.MaxUint32
+	}
+	return uint32(s)
 }

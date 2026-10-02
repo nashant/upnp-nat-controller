@@ -4,4 +4,4 @@ description: Keeps UPnP port mappings on the router for annotated LoadBalancer S
 type: application
 version: 0.1.0
 # Image tag deployed by default.
-appVersion: "v0.1.0"
+appVersion: "0.1.0"

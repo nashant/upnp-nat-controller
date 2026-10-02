@@ -39,13 +39,14 @@ var legacyAnnotations = []string{"advertise.upnp/kopf-managed", "advertise.upnp/
 
 // Reconcile results, as the upnp_reconcile_total "result" label.
 const (
-	resultSuccess     = "success"
-	resultUnreachable = "router_unreachable"
-	resultWaiting     = "waiting"
-	resultInvalid     = "invalid"
-	resultSkipped     = "skipped"
-	resultCleanup     = "cleanup"
-	resultError       = "error"
+	resultSuccess       = "success"
+	resultUnreachable   = "router_unreachable"
+	resultWaiting       = "waiting"
+	resultInvalid       = "invalid"
+	resultSkipped       = "skipped"
+	resultCleanup       = "cleanup"
+	resultCleanupFailed = "cleanup_failed"
+	resultError         = "error"
 )
 
 // ServiceReconciler keeps the router's port mappings in line with the
@@ -60,6 +61,8 @@ type ServiceReconciler struct {
 	Metrics  *metrics.Metrics
 	// OnPass, if set, is called after every reconcile that ran to completion.
 	OnPass func()
+	// Names builds and recognises mapping descriptions; zero means the defaults.
+	Names mapping.Descriptions
 
 	ResyncInterval   time.Duration // requeue after a good pass (30s)
 	RetryInterval    time.Duration // requeue while the router is unreachable (10s)
@@ -69,7 +72,7 @@ type ServiceReconciler struct {
 
 	mu sync.Mutex
 	// waiting holds Services that already got a WaitingForIP event.
-	waiting map[types.UID]bool
+	waiting map[types.UID]string
 	// seen holds the mappings each Service had on the router at its last
 	// pass, to tell a drift repair from a first add.
 	seen map[types.UID]map[portKey]bool
@@ -136,6 +139,9 @@ func (r *ServiceReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	spec, err := annotations.Parse(svc.Annotations, svc.Spec.Ports, r.DefaultLease)
+	if err == nil {
+		err = spec.ValidateLease(clampUint32(int64(2 * r.ResyncInterval / time.Second)))
+	}
 	if err != nil {
 		r.Recorder.Eventf(&svc, nil, corev1.EventTypeWarning, "InvalidAnnotations", "Reconcile", "%v", err)
 		return ctrl.Result{}, resultInvalid, nil
@@ -143,6 +149,13 @@ func (r *ServiceReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	ip, ok := r.ingressIP(&svc)
 	if !ok {
+		// Without an IPv4 target, mappings made for the previous IP must go:
+		// the LB pool may hand that IP to another Service.
+		if controllerutil.ContainsFinalizer(&svc, Finalizer) {
+			if actual, err := r.UPnP.List(ctx); err != nil || r.apply(ctx, logger, &svc, nil, actual).unreachable {
+				return ctrl.Result{RequeueAfter: r.RetryInterval}, resultUnreachable, nil
+			}
+		}
 		return ctrl.Result{RequeueAfter: r.IPWaitInterval}, resultWaiting, nil
 	}
 
@@ -166,7 +179,7 @@ func (r *ServiceReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		logger.V(1).Info("router unreachable, will retry", "error", err.Error())
 		return ctrl.Result{RequeueAfter: r.RetryInterval}, resultUnreachable, nil
 	}
-	if r.apply(ctx, logger, &svc, desired, actual) {
+	if r.apply(ctx, logger, &svc, desired, actual).unreachable {
 		return ctrl.Result{RequeueAfter: r.RetryInterval}, resultUnreachable, nil
 	}
 	return ctrl.Result{RequeueAfter: r.ResyncInterval}, resultSuccess, nil
@@ -184,25 +197,33 @@ func (r *ServiceReconciler) ingressIP(svc *corev1.Service) (string, bool) {
 			return a.String(), true
 		}
 	}
+	reason, typ, msg := "WaitingForIP", corev1.EventTypeNormal, "waiting for a LoadBalancer IP"
 	if len(ingress) > 0 {
-		r.Recorder.Eventf(svc, nil, corev1.EventTypeWarning, "NoIPv4Ingress", "Reconcile", "LoadBalancer ingress has no IPv4 address; UPnP mappings need one")
-		return "", false
+		reason, typ, msg = "NoIPv4Ingress", corev1.EventTypeWarning, "LoadBalancer ingress has no IPv4 address; UPnP mappings need one"
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.waiting == nil {
-		r.waiting = map[types.UID]bool{}
+		r.waiting = map[types.UID]string{}
 	}
-	if !r.waiting[svc.UID] {
-		r.waiting[svc.UID] = true
-		r.Recorder.Eventf(svc, nil, corev1.EventTypeNormal, "WaitingForIP", "Reconcile", "waiting for a LoadBalancer IP")
+	if r.waiting[svc.UID] != reason {
+		r.waiting[svc.UID] = reason
+		r.Recorder.Eventf(svc, nil, typ, reason, "Reconcile", "%s", msg)
 	}
 	return "", false
 }
 
-// apply executes the plan for svc. It reports whether the router became
-// unreachable part-way, in which case the remaining actions are skipped.
-func (r *ServiceReconciler) apply(ctx context.Context, logger logr.Logger, svc *corev1.Service, desired []mapping.Desired, actual []upnp.PortMapping) (unreachable bool) {
+// applyResult reports how a pass over the plan went.
+type applyResult struct {
+	// unreachable: the router stopped answering; remaining actions were skipped.
+	unreachable bool
+	// failed: at least one action failed for another reason (fault, conflict).
+	failed bool
+}
+
+// apply executes the plan for svc.
+func (r *ServiceReconciler) apply(ctx context.Context, logger logr.Logger, svc *corev1.Service, desired []mapping.Desired, actual []upnp.PortMapping) applyResult {
+	var res applyResult
 	owner := mapping.Owner{Namespace: svc.Namespace, Name: svc.Name}
 	r.mu.Lock()
 	prevSeen := r.seen[svc.UID]
@@ -218,12 +239,13 @@ func (r *ServiceReconciler) apply(ctx context.Context, logger logr.Logger, svc *
 		}
 	}
 
-	for _, act := range mapping.Plan(owner, desired, actual, 2*r.ResyncInterval) {
+	for _, act := range names(r.Names).Plan(owner, desired, actual, 2*r.ResyncInterval) {
 		var err error
 		m := act.Mapping
 		switch act.Kind {
 		case mapping.Conflict:
 			r.conflict(svc, m, act.Existing)
+			res.failed = true
 			continue
 		case mapping.Add, mapping.Renew:
 			err = r.UPnP.Add(ctx, m)
@@ -259,15 +281,18 @@ func (r *ServiceReconciler) apply(ctx context.Context, logger logr.Logger, svc *
 		case errors.Is(err, upnp.ErrUnreachable):
 			logger.V(1).Info("router unreachable mid-pass", "error", err.Error())
 			r.remember(svc.UID, nowSeen)
-			return true
+			res.unreachable = true
+			return res
 		case errors.Is(err, upnp.ErrConflict):
 			r.conflict(svc, m, nil)
+			res.failed = true
 		default:
 			r.Recorder.Eventf(svc, nil, corev1.EventTypeWarning, "MappingFailed", "Reconcile", "%s %s/%d: %v", act.Kind, m.Protocol, m.ExternalPort, err)
+			res.failed = true
 		}
 	}
 	r.remember(svc.UID, nowSeen)
-	return false
+	return res
 }
 
 // deleteIfPresent deletes a mapping; one already gone is not an error.
@@ -311,17 +336,22 @@ func (r *ServiceReconciler) forget(key types.NamespacedName, uid types.UID) {
 // it gives up after FinalizerTimeout so a dead router never blocks it.
 func (r *ServiceReconciler) cleanup(ctx context.Context, logger logr.Logger, svc *corev1.Service) (ctrl.Result, string, error) {
 	actual, err := r.UPnP.List(ctx)
+	result := resultUnreachable
 	failed := err != nil
 	if !failed {
-		failed = r.apply(ctx, logger, svc, nil, actual)
+		res := r.apply(ctx, logger, svc, nil, actual)
+		failed = res.unreachable || res.failed
+		if !res.unreachable {
+			result = resultCleanupFailed
+		}
 	}
 	if failed {
 		deleting := !svc.DeletionTimestamp.IsZero()
 		if !deleting || r.Clock.Since(svc.DeletionTimestamp.Time) < r.FinalizerTimeout {
-			return ctrl.Result{RequeueAfter: r.RetryInterval}, resultUnreachable, nil
+			return ctrl.Result{RequeueAfter: r.RetryInterval}, result, nil
 		}
 		r.Recorder.Eventf(svc, nil, corev1.EventTypeWarning, "OrphanedMappings", "Reconcile",
-			"router unreachable for %s; removing finalizer, port mappings for this Service may remain on the router", r.FinalizerTimeout)
+			"could not delete this Service's port mappings within %s; removing finalizer, they may remain on the router", r.FinalizerTimeout)
 	}
 	controllerutil.RemoveFinalizer(svc, Finalizer)
 	controllerutil.RemoveFinalizer(svc, LegacyFinalizer)
@@ -363,4 +393,11 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager, opts controller.O
 		b = b.WatchesRawSource(src)
 	}
 	return b.Complete(r)
+}
+
+func names(d mapping.Descriptions) mapping.Descriptions {
+	if d.Prefix == "" {
+		return mapping.DefaultDescriptions
+	}
+	return d
 }

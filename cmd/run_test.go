@@ -33,7 +33,7 @@ import (
 
 func freePort(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestRun_ChartRBACIsSufficient(t *testing.T) {
 	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "upnp"}}); err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command("helm", "template", "upnp-nat-controller", "../helm", "--namespace", "upnp", "--show-only", "templates/rbac.yaml").Output()
+	out, err := exec.CommandContext(t.Context(), "helm", "template", "upnp-nat-controller", "../helm", "--namespace", "upnp", "--show-only", "templates/rbac.yaml").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,11 +134,15 @@ func runAndCheck(t *testing.T, cfg *rest.Config, k8s client.Client, extra ...str
 	}
 	httpOK := func(path string, addr string) func() bool {
 		return func() bool {
-			resp, err := http.Get(fmt.Sprintf("http://%s%s", addr, path))
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("http://%s%s", addr, path), nil)
 			if err != nil {
 				return false
 			}
-			resp.Body.Close()
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return false
+			}
+			_ = resp.Body.Close()
 			return resp.StatusCode == http.StatusOK
 		}
 	}

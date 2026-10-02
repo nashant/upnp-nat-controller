@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,24 +28,26 @@ import (
 	gatewayv1alpha1 "github.com/nashant/upnp-nat-controller/api/v1alpha1"
 	ctl "github.com/nashant/upnp-nat-controller/internal/controller"
 	"github.com/nashant/upnp-nat-controller/internal/health"
+	"github.com/nashant/upnp-nat-controller/internal/mapping"
 	"github.com/nashant/upnp-nat-controller/internal/metrics"
 	"github.com/nashant/upnp-nat-controller/internal/upnp"
 )
 
 // Options are the command-line options.
 type Options struct {
-	MetricsAddr      string
-	ProbeAddr        string
-	LeaderElect      bool
-	LeaderElectionNS string
-	IGDURL           *url.URL
-	ResyncInterval   time.Duration
-	LeaseDuration    uint32
-	SOAPTimeout      time.Duration
-	FinalizerTimeout time.Duration
-	RateLimit        float64
-	RateBurst        int
-	Zap              zap.Options
+	MetricsAddr       string
+	ProbeAddr         string
+	LeaderElect       bool
+	LeaderElectionNS  string
+	IGDURL            *url.URL
+	ResyncInterval    time.Duration
+	LeaseDuration     uint32
+	SOAPTimeout       time.Duration
+	FinalizerTimeout  time.Duration
+	DescriptionPrefix string
+	RateLimit         float64
+	RateBurst         int
+	Zap               zap.Options
 
 	// skipNameValidation lets tests start the manager more than once per process.
 	skipNameValidation bool
@@ -67,6 +70,7 @@ func parseFlags(args []string) (Options, error) {
 	fs.Int64Var(&lease, "lease-duration", 3600, "Default port mapping lease in seconds (0 = permanent).")
 	fs.DurationVar(&o.SOAPTimeout, "soap-timeout", 5*time.Second, "Timeout for each router request.")
 	fs.DurationVar(&o.FinalizerTimeout, "finalizer-timeout", 10*time.Minute, "How long a deleted Service waits for an unreachable router before its finalizer is removed.")
+	fs.StringVar(&o.DescriptionPrefix, "description-prefix", mapping.DefaultPrefix, "Prefix of the port mapping descriptions that mark mappings as this controller's. Mappings under the previous default ("+mapping.FormerPrefix+") are adopted.")
 	fs.Float64Var(&o.RateLimit, "rate-limit", 5, "Router requests per second.")
 	fs.IntVar(&o.RateBurst, "rate-burst", 10, "Router request burst.")
 	o.Zap.BindFlags(fs)
@@ -86,17 +90,28 @@ func parseFlags(args []string) (Options, error) {
 			o.IGDURL = u
 		}
 	}
-	if lease < 0 || lease > 1<<32-1 {
+	if lease < 0 || lease > math.MaxUint32 {
 		errs = append(errs, fmt.Errorf("--lease-duration: %d out of range", lease))
+	} else {
+		o.LeaseDuration = uint32(lease)
 	}
-	o.LeaseDuration = uint32(lease)
 	if o.ResyncInterval <= 0 {
 		errs = append(errs, errors.New("--resync-interval must be positive"))
+	}
+	if err := descriptions(o.DescriptionPrefix).Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("--description-prefix: %w", err))
+	}
+	if o.LeaseDuration != 0 && o.ResyncInterval > 0 && time.Duration(o.LeaseDuration)*time.Second <= 2*o.ResyncInterval {
+		errs = append(errs, fmt.Errorf("--lease-duration %ds must be 0 or longer than twice --resync-interval (%s)", o.LeaseDuration, o.ResyncInterval))
 	}
 	if o.SOAPTimeout <= 0 {
 		errs = append(errs, errors.New("--soap-timeout must be positive"))
 	}
 	return o, errors.Join(errs...)
+}
+
+func descriptions(prefix string) mapping.Descriptions {
+	return mapping.Descriptions{Prefix: prefix, Adopt: []string{mapping.FormerPrefix}}
 }
 
 func main() {
@@ -155,7 +170,7 @@ func run(ctx context.Context, cfg *rest.Config, o Options, reg prometheus.Regist
 
 	r := &ctl.ServiceReconciler{
 		K8s: mgr.GetClient(), UPnP: router, Recorder: rec,
-		Clock: clk, Metrics: m, OnPass: func() { tracker.Beat("service-reconciler", o.ResyncInterval) },
+		Clock: clk, Metrics: m, Names: descriptions(o.DescriptionPrefix), OnPass: func() { tracker.Beat("service-reconciler", o.ResyncInterval) },
 		ResyncInterval: o.ResyncInterval, RetryInterval: 10 * time.Second, IPWaitInterval: 5 * time.Second,
 		DefaultLease: o.LeaseDuration, FinalizerTimeout: o.FinalizerTimeout,
 	}
@@ -164,7 +179,7 @@ func run(ctx context.Context, cfg *rest.Config, o Options, reg prometheus.Regist
 	}
 	poller := &ctl.IGDPoller{
 		K8s: mgr.GetClient(), UPnP: router, Recorder: rec,
-		Clock: clk, Resync: resync, Metrics: m, Log: ctrl.Log.WithName("igd"),
+		Clock: clk, Resync: resync, Metrics: m, Names: descriptions(o.DescriptionPrefix), Log: ctrl.Log.WithName("igd"),
 		OnPass: func(next time.Duration) { tracker.Beat("igd-poller", next) },
 	}
 	if err := mgr.Add(poller); err != nil {

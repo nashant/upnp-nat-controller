@@ -33,7 +33,33 @@ func newNamespace(t *testing.T) string {
 	if err := k8s.Create(bg, ns); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { deleteServices(t, ns.Name) })
 	return ns.Name
+}
+
+// deleteServices removes every Service in ns, finalizers included. envtest
+// has no namespace controller, so leftover Services would exhaust the
+// Service IP range across repeated runs.
+func deleteServices(t *testing.T, ns string) {
+	t.Helper()
+	var list corev1.ServiceList
+	if err := k8s.List(bg, &list, client.InNamespace(ns)); err != nil {
+		t.Errorf("list Services in %s: %v", ns, err)
+		return
+	}
+	for i := range list.Items {
+		svc := &list.Items[i]
+		if len(svc.Finalizers) > 0 {
+			svc.Finalizers = nil
+			if err := k8s.Update(bg, svc); err != nil && !apierrors.IsNotFound(err) {
+				t.Errorf("clear finalizers on %s: %v", svc.Name, err)
+			}
+		}
+		if err := k8s.Delete(bg, svc); err != nil && !apierrors.IsNotFound(err) {
+			t.Errorf("delete %s: %v", svc.Name, err)
+		}
+	}
+	_ = k8s.Delete(bg, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
 }
 
 func tcpPort(p int32) corev1.ServicePort {
@@ -255,8 +281,8 @@ func TestReconcile_Success_RequeueAfterResyncInterval(t *testing.T) { // FR-SVC-
 		t.Fatalf("result %+v, want RequeueAfter 30s", res)
 	}
 	want := []upnp.PortMapping{
-		{Protocol: corev1.ProtocolTCP, ExternalPort: 443, InternalPort: 443, InternalClient: lbIP, Enabled: true, Description: mapping.OwnerDescription(ns, "public-traefik"), LeaseDuration: 3600},
-		{Protocol: corev1.ProtocolTCP, ExternalPort: 32400, InternalPort: 32400, InternalClient: lbIP, Enabled: true, Description: mapping.OwnerDescription(ns, "public-traefik"), LeaseDuration: 3600},
+		{Protocol: corev1.ProtocolTCP, ExternalPort: 443, InternalPort: 443, InternalClient: lbIP, Enabled: true, Description: mapping.DefaultDescriptions.For(mapping.Owner{Namespace: ns, Name: "public-traefik"}), LeaseDuration: 3600},
+		{Protocol: corev1.ProtocolTCP, ExternalPort: 32400, InternalPort: 32400, InternalClient: lbIP, Enabled: true, Description: mapping.DefaultDescriptions.For(mapping.Owner{Namespace: ns, Name: "public-traefik"}), LeaseDuration: 3600},
 	}
 	if got := h.router.Mappings(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("mappings %+v", got)
@@ -484,7 +510,7 @@ func TestReconcile_TypeChangedToClusterIP_CleansUp(t *testing.T) { // FR-SVC-9
 func TestReconcile_Delete_RemovesMappingsThenFinalizer(t *testing.T) { // FR-SVC-9, D7, S7
 	h := newSvcHarness(t)
 	ns := newNamespace(t)
-	other := upnp.PortMapping{Protocol: corev1.ProtocolTCP, ExternalPort: 80, InternalPort: 80, InternalClient: "172.16.1.3", Enabled: true, Description: mapping.OwnerDescription(ns, "other")}
+	other := upnp.PortMapping{Protocol: corev1.ProtocolTCP, ExternalPort: 80, InternalPort: 80, InternalClient: "172.16.1.3", Enabled: true, Description: mapping.DefaultDescriptions.For(mapping.Owner{Namespace: ns, Name: "other"})}
 	h.router.Seed(other)
 	svc := managedLB(t, ns, "lb", lbIP)
 	h.reconcile(t, svc)
@@ -569,7 +595,7 @@ func TestReconcile_RemovesLegacyKopfFinalizerAndAnnotations(t *testing.T) { // F
 	if got.Annotations["unrelated"] != "x" {
 		t.Fatal("unrelated annotation removed")
 	}
-	if ms := h.router.Mappings(); len(ms) != 1 || ms[0].Description != mapping.OwnerDescription(ns, "public-traefik") {
+	if ms := h.router.Mappings(); len(ms) != 1 || ms[0].Description != mapping.DefaultDescriptions.For(mapping.Owner{Namespace: ns, Name: "public-traefik"}) {
 		t.Fatalf("legacy mapping not adopted: %+v", ms)
 	}
 	if hasEvent(drainEvents(h.rec), "PortConflict") {
@@ -676,5 +702,142 @@ func TestReconcile_DeletingWithKopfFinalizer_RouterDownTimesOut(t *testing.T) { 
 	h.reconcile(t, svc)
 	if err := k8s.Get(bg, client.ObjectKeyFromObject(svc), &corev1.Service{}); !apierrors.IsNotFound(err) {
 		t.Fatalf("Service not released after timeout: %v", err)
+	}
+}
+
+func TestReconcile_Delete_FaultOnDelete_KeepsFinalizerUntilTimeout(t *testing.T) { // FR-SVC-9, FR-DISC-7 (501 is transient)
+	for _, fault := range []error{upnp.ErrActionFailed, upnp.ErrNotAuthorized} {
+		t.Run(fault.Error(), func(t *testing.T) {
+			h := newSvcHarness(t)
+			ns := newNamespace(t)
+			svc := managedLB(t, ns, "lb", lbIP)
+			h.reconcile(t, svc)
+			if err := k8s.Delete(bg, svc); err != nil {
+				t.Fatal(err)
+			}
+			h.router.SetError("Delete", fault)
+			if res := h.reconcile(t, svc); res.RequeueAfter != 10*time.Second {
+				t.Fatalf("got %+v, want retry after RetryInterval", res)
+			}
+			if !controllerutil.ContainsFinalizer(getSvc(t, svc), Finalizer) {
+				t.Fatal("finalizer released although Delete failed")
+			}
+			if hasEvent(drainEvents(h.rec), "OrphanedMappings") {
+				t.Fatal("OrphanedMappings before the timeout")
+			}
+			h.router.SetError("Delete", nil)
+			h.reconcile(t, svc)
+			if len(h.router.Mappings()) != 0 {
+				t.Fatalf("mappings left %+v", h.router.Mappings())
+			}
+			if err := k8s.Get(bg, client.ObjectKeyFromObject(svc), &corev1.Service{}); !apierrors.IsNotFound(err) {
+				t.Fatalf("Service not gone after successful retry: %v", err)
+			}
+		})
+	}
+}
+
+func TestReconcile_Delete_PersistentFault_TimeoutReleasesWithEvent(t *testing.T) { // FR-SVC-9
+	h := newSvcHarness(t)
+	ns := newNamespace(t)
+	svc := managedLB(t, ns, "lb", lbIP)
+	h.reconcile(t, svc)
+	if err := k8s.Delete(bg, svc); err != nil {
+		t.Fatal(err)
+	}
+	h.router.SetError("Delete", upnp.ErrNotAuthorized)
+	h.clk.Step(11 * time.Minute)
+	h.reconcile(t, svc)
+	if err := k8s.Get(bg, client.ObjectKeyFromObject(svc), &corev1.Service{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("Service not released after timeout: %v", err)
+	}
+	if !hasEvent(drainEvents(h.rec), "OrphanedMappings") {
+		t.Fatal("no OrphanedMappings event")
+	}
+}
+
+func TestReconcile_Unmanage_FaultOnDelete_KeepsFinalizer(t *testing.T) { // FR-SVC-9
+	h := newSvcHarness(t)
+	ns := newNamespace(t)
+	svc := managedLB(t, ns, "lb", lbIP)
+	h.reconcile(t, svc)
+	svc = getSvc(t, svc)
+	delete(svc.Annotations, annotations.TCPEnabled)
+	if err := k8s.Update(bg, svc); err != nil {
+		t.Fatal(err)
+	}
+	h.router.SetError("Delete", upnp.ErrActionFailed)
+	if res := h.reconcile(t, svc); res.RequeueAfter != 10*time.Second {
+		t.Fatalf("got %+v", res)
+	}
+	if !controllerutil.ContainsFinalizer(getSvc(t, svc), Finalizer) {
+		t.Fatal("finalizer removed although mappings were not deleted")
+	}
+}
+
+func TestReconcile_IngressLost_DeletesMappingsKeepsFinalizer(t *testing.T) { // FR-SVC-2/7 (review R2)
+	for name, ingress := range map[string][]corev1.LoadBalancerIngress{
+		"cleared":       nil,
+		"ipv6 only":     {{IP: "fd00::1"}},
+		"hostname only": {{Hostname: "lb.example.com"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newSvcHarness(t)
+			ns := newNamespace(t)
+			svc := managedLB(t, ns, "lb", lbIP)
+			h.reconcile(t, svc)
+			if len(h.router.Mappings()) != 2 {
+				t.Fatal("setup: not mapped")
+			}
+			setIngress(t, svc, ingress...)
+			if res := h.reconcile(t, svc); res.RequeueAfter != 5*time.Second {
+				t.Fatalf("got %+v, want IP wait requeue", res)
+			}
+			if ms := h.router.Mappings(); len(ms) != 0 {
+				t.Fatalf("mappings still forward to the old IP: %+v", ms)
+			}
+			if !controllerutil.ContainsFinalizer(getSvc(t, svc), Finalizer) {
+				t.Fatal("finalizer removed; the Service is still managed")
+			}
+			setIngress(t, svc, corev1.LoadBalancerIngress{IP: "172.16.1.9"})
+			h.reconcile(t, svc)
+			if ms := h.router.Mappings(); len(ms) != 2 || ms[0].InternalClient != "172.16.1.9" {
+				t.Fatalf("not re-mapped to the new IP: %+v", ms)
+			}
+		})
+	}
+}
+
+func TestReconcile_NoIPv4Ingress_EventOnce(t *testing.T) { // FR-SVC-4 "no event spam" (review R8)
+	h := newSvcHarness(t)
+	ns := newNamespace(t)
+	svc := managedLB(t, ns, "lb", "")
+	setIngress(t, svc, corev1.LoadBalancerIngress{Hostname: "lb.example.com"})
+	for i := 0; i < 3; i++ {
+		h.reconcile(t, svc)
+	}
+	n := 0
+	for _, e := range drainEvents(h.rec) {
+		if hasEvent([]string{e}, "NoIPv4Ingress") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("NoIPv4Ingress events %d, want 1", n)
+	}
+}
+
+func TestReconcile_LeaseTooShort_InvalidAnnotations(t *testing.T) { // review P4/R6
+	h := newSvcHarness(t)
+	ns := newNamespace(t)
+	svc := createService(t, ns, "lb", corev1.ServiceTypeLoadBalancer,
+		map[string]string{annotations.TCPEnabled: "true", annotations.TCPPorts: "443", annotations.LeaseSeconds: "30"}, tcpPort(443))
+	setIngress(t, svc, corev1.LoadBalancerIngress{IP: lbIP})
+	h.reconcile(t, svc)
+	if !hasEvent(drainEvents(h.rec), "InvalidAnnotations") {
+		t.Fatal("no InvalidAnnotations event for a lease shorter than 2× resync")
+	}
+	if routerCalls(h.router) != 0 {
+		t.Fatal("router called with an invalid lease")
 	}
 }

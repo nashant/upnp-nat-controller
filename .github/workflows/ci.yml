@@ -7,74 +7,200 @@ on:
       - main
     tags:
       - 'v*'
+  schedule:
+    - cron: '17 4 * * 1' # weekly: new CVEs against unchanged code, fuzzing, image rescan
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-permissions:
-  contents: read
+permissions: {}
 
 env:
+  # renovate: datasource=github-releases depName=golangci/golangci-lint
   GOLANGCI_LINT_VERSION: v2.14.0
+  # renovate: datasource=github-releases depName=yannh/kubeconform
   KUBECONFORM_VERSION: v0.8.0
+  IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
   test:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false # this workflow publishes images; don't restore caches PRs can write
       - name: Vet
         run: go vet ./...
       - name: Lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
-      - uses: azure/setup-helm@v5
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - name: Install kubeconform
-        run: go install github.com/yannh/kubeconform/cmd/kubeconform@${{ env.KUBECONFORM_VERSION }}
-      - name: Cache envtest binaries
-        uses: actions/cache@v6
-        with:
-          path: bin/k8s
-          key: envtest-${{ runner.os }}-${{ hashFiles('Makefile') }}
+        run: go install "github.com/yannh/kubeconform/cmd/kubeconform@${KUBECONFORM_VERSION}"
       - name: Test
         run: make test
-      - name: Coverage
-        run: go tool cover -func=cover.out | tail -1
+      - name: Coverage gates
+        run: hack/coverage-gate.sh cover.out
 
-  # Images are published only after tests pass, and never from pull requests.
-  image:
-    needs: test
-    if: github.event_name != 'pull_request'
+  verify:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false # this workflow publishes images; don't restore caches PRs can write
+      - name: go.mod is tidy
+        run: go mod tidy -diff
+      - name: Generated code and CRDs are up to date
+        run: |
+          make generate manifests
+          if [ -n "$(git status --porcelain -- api/ helm/crds/)" ]; then
+            git --no-pager diff -- api/ helm/crds/
+            echo "::error::run 'make generate manifests' and commit the result"
+            exit 1
+          fi
+
+  govulncheck:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+          repo-checkout: false
+
+  fuzz:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false # this workflow publishes images; don't restore caches PRs can write
+      - name: Fuzz the ports annotation parser
+        run: go test ./internal/annotations -run '^$' -fuzz '^FuzzParsePorts$' -fuzztime 2m
+      - name: Keep the failing input
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-corpus
+          path: internal/annotations/testdata/fuzz
+
+  # Published only after every check passes, and only from a push to main or
+  # a release tag (or a manual run on main). Never from pull requests.
+  image:
+    needs: [test, verify, govulncheck]
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # Sigstore signing of the provenance attestation
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: nashant/upnp-nat-controller
+          images: ${{ env.IMAGE }}
           tags: |
-            type=semver,pattern=v{{version}}
+            type=semver,pattern={{version}}
             type=sha,prefix=sha-
           flavor: |
             latest=false
-      - uses: docker/build-push-action@v7
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: mode=max
+          sbom: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  # Scans a release image after it is pushed, and rescans the latest release
+  # weekly for newly published CVEs. It holds no secrets.
+  image-scan:
+    needs: [image]
+    if: >-
+      always() &&
+      (github.event_name == 'schedule' ||
+       (startsWith(github.ref, 'refs/tags/v') && needs.image.result == 'success'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - id: ref
+        name: Pick the image to scan
+        env:
+          REF: ${{ github.ref }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [[ "$REF" == refs/tags/v* ]]; then
+            tag="${REF#refs/tags/v}"
+          else
+            tag="$(gh release view --repo "$REPO" --json tagName --jq .tagName 2>/dev/null || true)"
+            tag="${tag#v}"
+          fi
+          if [ -z "$tag" ]; then
+            echo "::notice::no release yet; nothing to scan"
+            exit 0
+          fi
+          echo "image=${IMAGE}:${tag}" >> "$GITHUB_OUTPUT"
+      - id: scan
+        if: steps.ref.outputs.image != ''
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: ${{ steps.ref.outputs.image }}
+          fail-build: false
+          only-fixed: true
+          output-format: sarif
+      - if: steps.ref.outputs.image != ''
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+          category: grype-image

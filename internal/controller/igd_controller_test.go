@@ -134,7 +134,7 @@ func TestIGD_UsesSpecPollingInterval(t *testing.T) { // FR-IGD-1
 func TestIGD_StatusFieldsPopulated(t *testing.T) { // FR-IGD-2
 	h := newIGDHarness(t)
 	owned := upnp.PortMapping{Protocol: corev1.ProtocolTCP, ExternalPort: 443, InternalPort: 443, InternalClient: "172.16.1.2", Enabled: true,
-		Description: mapping.OwnerDescription("traefik", "public-traefik"), LeaseDuration: 3000}
+		Description: mapping.DefaultDescriptions.For(mapping.Owner{Namespace: "traefik", Name: "public-traefik"}), LeaseDuration: 3000}
 	foreign := upnp.PortMapping{Protocol: corev1.ProtocolTCP, ExternalPort: 80, InternalPort: 80, InternalClient: "192.168.1.50", Enabled: true, Description: "Xbox"}
 	h.router.Seed(owned, foreign)
 	h.poll(t)
@@ -308,7 +308,7 @@ func TestIGD_BecomesReachable_TriggersResync(t *testing.T) { // S3
 func TestIGD_StatusNotRewrittenWhenUnchanged(t *testing.T) { // FR-IGD-4
 	h := newIGDHarness(t)
 	h.router.Seed(upnp.PortMapping{Protocol: corev1.ProtocolTCP, ExternalPort: 443, InternalPort: 443, InternalClient: "172.16.1.2", Enabled: true,
-		Description: mapping.OwnerDescription("a", "b"), LeaseDuration: 3000})
+		Description: mapping.DefaultDescriptions.For(mapping.Owner{Namespace: "a", Name: "b"}), LeaseDuration: 3000})
 	h.poll(t)
 	rv := getIGD(t).ResourceVersion
 	for i := 0; i < 5; i++ { // uptime, lease and lastSeen tick; nothing else changes
@@ -356,7 +356,7 @@ func TestIGD_TrafficOnlyInMetrics(t *testing.T) { // FR-IGD-4
 func TestIGD_ListFailureKeepsPortMappings(t *testing.T) {
 	h := newIGDHarness(t)
 	h.router.Seed(upnp.PortMapping{Protocol: corev1.ProtocolTCP, ExternalPort: 443, InternalPort: 443, InternalClient: "172.16.1.2", Enabled: true,
-		Description: mapping.OwnerDescription("a", "b")})
+		Description: mapping.DefaultDescriptions.For(mapping.Owner{Namespace: "a", Name: "b"})})
 	h.poll(t)
 	h.router.SetError("List", upnp.ErrUnreachable)
 	h.clk.Step(30 * time.Second)

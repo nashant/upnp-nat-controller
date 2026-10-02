@@ -297,16 +297,24 @@ Tests first:
 
 ## 9. Cutover plan (home cluster)
 
-1. Merge M0–M9; tag `v0.1.0`.
-2. In the home repo, bump `clusters/prod/platform/upnp-nat-controller/helmrelease.yaml` chart `version: 0.0.1` → `0.1.0` (Flux `HelmRelease`, source `GitRepository` `upnp-nat-controller`).
-3. On rollout the new controller: strips kopf finalizer/annotations (S15), adopts `traefik/public-traefik` mappings, creates `internetgatewaydevice/default`.
-4. Verify §10, then delete the old CRD `internetgatewaydevices.crd.nashes.uk` and its CR (Helm does not delete CRDs from `crds/`).
-5. Rollback: revert chart version, then remove finalizer `upnp.nashes.uk/port-mappings` from managed Services (the Python controller doesn't know it, so deletes would hang). The Python controller re-adds its kopf finalizer on resume. It judges ownership by internal IP (`loadbalancer.py:42`), so a same-IP mapping described `upnp-nat-controller/...` falls through to `AddPortMapping` (`loadbalancer.py:47-57`) and is rewritten with its `<ns>/<name>` description. Rollback is therefore safe for mappings.
+Revised 2026-10-01. Flux ignores `spec.chart.spec.version` for `GitRepository` sources. What deploys is the `version` in `helm/Chart.yaml` on `main`, so bumping that version is the deploy and reverting it is the rollback. Helm does not install CRDs on upgrade.
+
+1. Merge M0–M9. release-please opens a release PR; merging it tags `v0.1.0`, and CI pushes `ghcr.io/nashant/upnp-nat-controller:0.1.0` (the chart `appVersion`). Make the GHCR package public, or configure image pull credentials in the cluster.
+2. In the home repo's `clusters/prod/platform/upnp-nat-controller/helmrelease.yaml`, set `install.crds` and `upgrade.crds` to `CreateReplace` and add `upgrade.remediation`. Then run `flux reconcile source git upnp-nat-controller` and confirm the chart artifact is `0.1.0` before the HelmRelease is resumed or reconciled.
+3. On rollout the new controller:
+   - strips the kopf finalizer and annotations (S15);
+   - adopts the `traefik/public-traefik` mappings, rewriting them as `unc/traefik/public-traefik`;
+   - creates `internetgatewaydevices.gateway.nashes.uk/default`.
+4. Verify §10. Then delete the old CRD `internetgatewaydevices.crd.nashes.uk` and its CR (Helm does not delete CRDs from `crds/`).
+5. Rollback:
+   1. Suspend the HelmRelease and `helm rollback` to the previous revision, or revert the merge on `main`.
+   2. Remove the finalizer `upnp.nashes.uk/port-mappings` from managed Services. The Python controller doesn't know it, so deletes would hang.
+   3. The Python controller re-adds its kopf finalizer on resume. It judges ownership by internal IP (`loadbalancer.py:42`), so a same-IP mapping described `unc/...` falls through to `AddPortMapping` (`loadbalancer.py:47-57`) and is rewritten with its `<ns>/<name>` description. Rollback is therefore safe for mappings.
 
 ## 10. Acceptance checklist (L4, real router)
 
-- [ ] `kubectl get igd default` shows `Ready=True`, correct external IP, `PublicExternalIP=True`.
-- [ ] Router UPnP status lists 443 and 32400 → `172.16.1.2`, description `upnp-nat-controller/traefik/public-traefik`.
+- [ ] `kubectl get internetgatewaydevices.gateway.nashes.uk default` shows `Ready=True`, correct external IP, `PublicExternalIP=True`. While the old CRD exists, the bare `igd` short name resolves to it.
+- [ ] Router UPnP status lists 443 and 32400 → `172.16.1.2`, description `unc/traefik/public-traefik`.
 - [ ] Restart the UPnP service on OPNsense → mappings back within 30 s, `RouterRestarted` event, pod restart count unchanged.
 - [ ] Reboot OPNsense → same.
 - [ ] Toggle PPPoE → `ExternalIPChanged` (if IP changes), mappings present.

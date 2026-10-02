@@ -165,3 +165,12 @@ func hasServicePort(ports []corev1.ServicePort, proto corev1.Protocol, port uint
 	}
 	return false
 }
+
+// ValidateLease rejects a non-permanent lease of minSeconds or less: such a
+// mapping could expire between two renewal passes.
+func (s Spec) ValidateLease(minSeconds uint32) error {
+	if s.LeaseSeconds != 0 && s.LeaseSeconds <= minSeconds {
+		return fmt.Errorf("%s: lease %ds is too short, want 0 (permanent) or more than %ds", LeaseSeconds, s.LeaseSeconds, minSeconds)
+	}
+	return nil
+}

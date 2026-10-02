@@ -70,7 +70,7 @@ func TestHealth_HTTP500WhenWedged(t *testing.T) { // S17
 	h := &healthz.Handler{Checks: map[string]healthz.Checker{"resync": tr.Check}}
 	get := func() int {
 		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+		h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
 		return rr.Code
 	}
 	if c := get(); c != http.StatusOK {

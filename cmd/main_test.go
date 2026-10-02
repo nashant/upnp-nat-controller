@@ -16,6 +16,9 @@ func TestFlags_Defaults(t *testing.T) { // §4, M8
 	if !o.LeaderElect || o.MetricsAddr != ":8080" || o.ProbeAddr != ":8081" || o.IGDURL != nil {
 		t.Fatalf("defaults %+v", o)
 	}
+	if o.DescriptionPrefix != "unc/" {
+		t.Fatalf("description prefix %q", o.DescriptionPrefix)
+	}
 	if o.RateLimit != 5 || o.RateBurst != 10 {
 		t.Fatalf("rate %v/%d", o.RateLimit, o.RateBurst)
 	}
@@ -43,9 +46,24 @@ func TestFlags_Invalid(t *testing.T) {
 		{"--soap-timeout=0s"},
 		{"--lease-duration=-1"},
 		{"--no-such-flag"},
+		{"--description-prefix="},
+		{"--description-prefix=has space/"},
+		{"--lease-duration=60"},  // ≤ 2 × 30s resync: expires between passes
+		{"--resync-interval=1h"}, // default 3600s lease < 2 × 1h
+
 	} {
 		if _, err := parseFlags(args); err == nil {
 			t.Errorf("parseFlags(%v): want error", args)
 		}
+	}
+}
+
+func TestFlags_DescriptionPrefixAndPermanentLease(t *testing.T) {
+	o, err := parseFlags([]string{"--description-prefix=k8s/", "--resync-interval=1h", "--lease-duration=0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.DescriptionPrefix != "k8s/" || o.LeaseDuration != 0 {
+		t.Fatalf("got %+v", o)
 	}
 }

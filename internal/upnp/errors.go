@@ -72,5 +72,5 @@ func Classify(err error) error {
 		}
 		return &FaultError{Code: code, Description: desc, sentinel: faultCodes[code]}
 	}
-	return fmt.Errorf("%w: %v", ErrUnreachable, err)
+	return fmt.Errorf("%w: %w", ErrUnreachable, err)
 }

@@ -79,7 +79,7 @@ func TestClassify_TransportErrorsAreUnreachable(t *testing.T) { // FR-DISC-4/7
 
 func TestClassify_AlreadyClassifiedUnchanged(t *testing.T) {
 	for _, err := range []error{ErrNoSuchEntry, fmt.Errorf("x: %w", ErrUnreachable), Classify(fault(718))} {
-		if got := Classify(err); got != err {
+		if got := Classify(err); got != err { //nolint:errorlint // identity: an already-classified error must come back unchanged
 			t.Errorf("Classify(%v) = %v, want unchanged", err, got)
 		}
 	}

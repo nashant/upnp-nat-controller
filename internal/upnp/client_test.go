@@ -433,3 +433,94 @@ func TestFaultError_Message(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestClient_RejectsTrafficControlURLOnDifferentHost(t *testing.T) { // NFR-SEC-2 (review T7)
+	f := fakeigd.New(t, fakeigd.WithTrafficControlHost("10.99.99.99:5000"))
+	cl := newClient(t, upnp.Config{IGDURL: mustURL(t, f.URL())})
+	if _, err := cl.Status(ctx); !errors.Is(err, upnp.ErrUntrustedDevice) {
+		t.Fatalf("got %v, want ErrUntrustedDevice", err)
+	}
+}
+
+func TestClient_List_714EndsList(t *testing.T) { // some routers answer 714 instead of 713 past the end
+	f := fakeigd.New(t)
+	f.AddMapping(fakeigd.Mapping{Protocol: "TCP", ExternalPort: 2, InternalPort: 2, InternalClient: "192.168.1.5"})
+	cl := newClient(t, upnp.Config{IGDURL: mustURL(t, f.URL())})
+	f.SetFault("GetGenericPortMappingEntry", 714)
+	list, err := cl.List(ctx)
+	if err != nil || len(list) != 0 {
+		t.Fatalf("got %v %v, want empty list and no error", list, err)
+	}
+}
+
+func TestDiscovery_BackoffResetsAfterSuccess(t *testing.T) { // FR-DISC-3 (review T7)
+	clk := clocktesting.NewFakeClock(time.Unix(1_000_000, 0))
+	var searches atomic.Int32
+	var up atomic.Bool
+	f := fakeigd.New(t)
+	cl := newClient(t, upnp.Config{
+		Clock:   clk,
+		Backoff: &upnp.Backoff{Initial: 2 * time.Second, Max: 60 * time.Second},
+		Searcher: upnp.SearcherFunc(func(context.Context) ([]*url.URL, error) {
+			searches.Add(1)
+			if !up.Load() {
+				return nil, nil
+			}
+			return []*url.URL{mustURL(t, f.URL())}, nil
+		}),
+	})
+	_, _ = cl.Status(ctx) // fail #1 → wait 2s
+	clk.Step(2 * time.Second)
+	_, _ = cl.Status(ctx) // fail #2 → wait 4s
+	clk.Step(4 * time.Second)
+	up.Store(true)
+	if _, err := cl.Status(ctx); err != nil { // success resets the schedule
+		t.Fatal(err)
+	}
+	up.Store(false)
+	cl.Invalidate()
+	_, _ = cl.Status(ctx) // fail → after a reset the next wait is 2s again, not 8s
+	n := searches.Load()
+	clk.Step(2 * time.Second)
+	_, _ = cl.Status(ctx)
+	if searches.Load() != n+1 {
+		t.Fatalf("searches %d → %d; backoff not reset after success", n, searches.Load())
+	}
+}
+
+func TestClient_Status_SecondCallFails(t *testing.T) {
+	f := fakeigd.New(t)
+	cl := newClient(t, upnp.Config{IGDURL: mustURL(t, f.URL())})
+	f.SetFault("GetExternalIPAddress", 501)
+	if _, err := cl.Status(ctx); !errors.Is(err, upnp.ErrActionFailed) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestClient_Traffic_SecondCallFails(t *testing.T) {
+	f := fakeigd.New(t)
+	cl := newClient(t, upnp.Config{IGDURL: mustURL(t, f.URL())})
+	f.SetFault("GetTotalBytesReceived", 501)
+	if _, err := cl.Traffic(ctx); !errors.Is(err, upnp.ErrActionFailed) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestComparePortKey(t *testing.T) {
+	for _, c := range []struct {
+		pa   corev1.Protocol
+		a    uint16
+		pb   corev1.Protocol
+		b    uint16
+		want int
+	}{
+		{corev1.ProtocolTCP, 80, corev1.ProtocolTCP, 443, -1},
+		{corev1.ProtocolTCP, 443, corev1.ProtocolTCP, 80, 1},
+		{corev1.ProtocolUDP, 1, corev1.ProtocolTCP, 65535, 1},
+		{corev1.ProtocolTCP, 22, corev1.ProtocolTCP, 22, 0},
+	} {
+		if got := upnp.ComparePortKey(c.pa, c.a, c.pb, c.b); got != c.want {
+			t.Errorf("ComparePortKey(%s/%d, %s/%d) = %d, want %d", c.pa, c.a, c.pb, c.b, got, c.want)
+		}
+	}
+}

@@ -1,5 +1,5 @@
 image:
-  repository: nashant/upnp-nat-controller
+  repository: ghcr.io/nashant/upnp-nat-controller
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
@@ -16,6 +16,12 @@ controller:
   leaseDuration: 3600
   soapTimeout: 5s
   finalizerTimeout: 10m
+  # Prefix of the router-side mapping descriptions. Keep it short: the
+  # router stores at most 63 bytes (longer names are shortened with a hash).
+  descriptionPrefix: unc/
+  # Router requests per second, and burst.
+  rateLimit: 5
+  rateBurst: 10
   leaderElect: true
   logLevel: info
   extraArgs: []

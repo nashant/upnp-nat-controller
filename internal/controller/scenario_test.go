@@ -49,6 +49,15 @@ func (c *collectingRecorder) Eventf(obj, _ runtime.Object, typ, reason, _, note 
 	c.events = append(c.events, fmt.Sprintf("%s %s %s/%s %s", typ, reason, o.GetNamespace(), o.GetName(), fmt.Sprintf(note, args...)))
 }
 
+func (c *collectingRecorder) snapshot() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.events...)
+}
+
+// permanentLeases suits scenarios with a resync interval longer than any lease.
+func permanentLeases(r *ServiceReconciler) { r.DefaultLease = 0 }
+
 func (c *collectingRecorder) has(reason string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -139,7 +148,7 @@ func (s *scenario) eventually(what string, cond func() bool) {
 	deadline := time.Now().Add(15 * time.Second)
 	for !cond() {
 		if time.Now().After(deadline) {
-			s.t.Fatalf("timed out waiting for %s; router: %+v; events: %v", what, s.f.Mappings(), s.rec.events)
+			s.t.Fatalf("timed out waiting for %s; router: %+v; events: %v", what, s.f.Mappings(), s.rec.snapshot())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -180,7 +189,7 @@ func (s *scenario) hasPorts(desc string, want ...string) func() bool {
 func (s *scenario) mappedLB(name string) (*corev1.Service, string) {
 	s.t.Helper()
 	svc := managedLB(s.t, s.ns, name, lbIP)
-	desc := mapping.OwnerDescription(s.ns, name)
+	desc := mapping.DefaultDescriptions.For(mapping.Owner{Namespace: s.ns, Name: name})
 	s.eventually("initial mappings", s.hasPorts(desc, "TCP/443->"+lbIP+":443", "TCP/32400->"+lbIP+":32400"))
 	return svc, desc
 }
@@ -223,7 +232,7 @@ func TestScenario_S3_RouterDownAtBoot(t *testing.T) { // D9
 		t.Fatalf("Discovered %+v, want False", c)
 	}
 	s.f.Start()
-	s.eventually("mapped after router start", s.hasPorts(mapping.OwnerDescription(s.ns, svc.Name), "TCP/443->"+lbIP+":443", "TCP/32400->"+lbIP+":32400"))
+	s.eventually("mapped after router start", s.hasPorts(mapping.DefaultDescriptions.For(mapping.Owner{Namespace: s.ns, Name: svc.Name}), "TCP/443->"+lbIP+":443", "TCP/32400->"+lbIP+":32400"))
 	s.eventually("Discovered=True", func() bool {
 		s.poll()
 		c := meta.FindStatusCondition(getIGD(t).Status.Conditions, gatewayv1alpha1.ConditionDiscovered)
@@ -252,7 +261,7 @@ func TestScenario_S5_MultipleServices(t *testing.T) { // D6
 	b := createService(t, s.ns, "b", corev1.ServiceTypeLoadBalancer,
 		map[string]string{annotations.TCPEnabled: "true", annotations.TCPPorts: "8443"}, tcpPort(8443))
 	setIngress(t, b, corev1.LoadBalancerIngress{IP: "172.16.1.3"})
-	descB := mapping.OwnerDescription(s.ns, "b")
+	descB := mapping.DefaultDescriptions.For(mapping.Owner{Namespace: s.ns, Name: "b"})
 	s.eventually("b mapped", s.hasPorts(descB, "TCP/8443->172.16.1.3:8443"))
 	s.f.Restart()
 	s.eventually("a restored", s.hasPorts(descA, "TCP/443->"+lbIP+":443", "TCP/32400->"+lbIP+":32400"))
@@ -264,7 +273,7 @@ func TestScenario_S6_UDPOnly(t *testing.T) { // D8
 	svc := createService(t, s.ns, "wg", corev1.ServiceTypeLoadBalancer,
 		map[string]string{annotations.UDPEnabled: "true", annotations.UDPPorts: "51820"}, udpPort(51820))
 	setIngress(t, svc, corev1.LoadBalancerIngress{IP: lbIP})
-	s.eventually("UDP mapped", s.hasPorts(mapping.OwnerDescription(s.ns, "wg"), "UDP/51820->"+lbIP+":51820"))
+	s.eventually("UDP mapped", s.hasPorts(mapping.DefaultDescriptions.For(mapping.Owner{Namespace: s.ns, Name: "wg"}), "UDP/51820->"+lbIP+":51820"))
 }
 
 func TestScenario_S7_DeleteService(t *testing.T) { // D7
@@ -297,7 +306,7 @@ func TestScenario_S9_Conflict(t *testing.T) {
 	foreign := fakeigd.Mapping{Protocol: "TCP", ExternalPort: 443, InternalPort: 443, InternalClient: "192.168.1.50", Enabled: true, Description: "Xbox"}
 	s.f.AddMapping(foreign)
 	managedLB(t, s.ns, "lb", lbIP)
-	s.eventually("other port mapped", s.hasPorts(mapping.OwnerDescription(s.ns, "lb"), "TCP/32400->"+lbIP+":32400"))
+	s.eventually("other port mapped", s.hasPorts(mapping.DefaultDescriptions.For(mapping.Owner{Namespace: s.ns, Name: "lb"}), "TCP/32400->"+lbIP+":32400"))
 	s.eventually("PortConflict event", func() bool { return s.rec.has("PortConflict") })
 	if got := s.ports("Xbox"); len(got) != 1 || got[0] != "TCP/443->192.168.1.50:443" {
 		t.Fatalf("foreign mapping changed: %v", got)
@@ -354,7 +363,7 @@ func TestScenario_S13_NotLoadBalancer(t *testing.T) { // D13
 
 func TestScenario_S14_ExternalIPChanged(t *testing.T) { // FR-DISC-5
 	// A long resync interval proves the restore comes from the triggered resync.
-	s := startScenario(t, scenarioOpts{resync: time.Hour})
+	s := startScenario(t, scenarioOpts{resync: time.Hour, tweak: permanentLeases})
 	_, desc := s.mappedLB("lb")
 	s.poll()
 	s.f.ClearMappings() // PPPoE reconnect: mappings flushed, new WAN IP
@@ -370,7 +379,7 @@ func TestScenario_S14_ExternalIPChanged(t *testing.T) { // FR-DISC-5
 }
 
 func TestScenario_RouterRestartTriggersImmediateResync(t *testing.T) { // FR-DISC-5
-	s := startScenario(t, scenarioOpts{resync: time.Hour})
+	s := startScenario(t, scenarioOpts{resync: time.Hour, tweak: permanentLeases})
 	_, desc := s.mappedLB("lb")
 	s.poll()
 	s.f.RestartOnNewPort()
@@ -395,7 +404,7 @@ func TestScenario_S15_LegacyCutover(t *testing.T) { // FR-SVC-10/11
 		t.Fatal(err)
 	}
 	setIngress(t, svc, corev1.LoadBalancerIngress{IP: lbIP})
-	s.eventually("legacy mapping adopted", s.hasPorts(mapping.OwnerDescription(s.ns, "public-traefik"), "TCP/443->"+lbIP+":443"))
+	s.eventually("legacy mapping adopted", s.hasPorts(mapping.DefaultDescriptions.For(mapping.Owner{Namespace: s.ns, Name: "public-traefik"}), "TCP/443->"+lbIP+":443"))
 	got := getSvc(t, svc)
 	if controllerutil.ContainsFinalizer(got, LegacyFinalizer) || got.Annotations["advertise.upnp/kopf-managed"] != "" {
 		t.Fatalf("kopf metadata left: %v %v", got.Finalizers, got.Annotations)
@@ -430,5 +439,37 @@ func TestScenario_S18_NoFlapOnReadFailure(t *testing.T) { // FR-SVC-12
 	}
 	if len(s.f.Mappings()) != 2 {
 		t.Fatalf("mappings %v", s.ports(""))
+	}
+}
+
+func TestScenario_LongServiceName_NoSelfConflict(t *testing.T) { // review P1: router keeps 63 bytes
+	clk := clocktesting.NewFakeClock(time.Unix(1_000_000, 0))
+	s := startScenario(t, scenarioOpts{fake: []fakeigd.Option{fakeigd.WithClock(clk)}, resync: time.Second})
+	name := "a-service-name-that-is-long-enough-to-overflow-the-pf-label-xx" // 63 chars, the Service name maximum
+	svc := createService(t, s.ns, name, corev1.ServiceTypeLoadBalancer,
+		map[string]string{annotations.TCPEnabled: "true", annotations.TCPPorts: "443", annotations.LeaseSeconds: "10"}, tcpPort(443))
+	setIngress(t, svc, corev1.LoadBalancerIngress{IP: lbIP})
+	desc := mapping.DefaultDescriptions.For(mapping.Owner{Namespace: s.ns, Name: name})
+	if len(mapping.DefaultPrefix)+len(s.ns)+1+len(name) <= mapping.MaxDescriptionLen {
+		t.Fatalf("test name too short to exercise truncation")
+	}
+	s.eventually("mapped with a fitting description", s.hasPorts(desc, "TCP/443->"+lbIP+":443"))
+	adds := s.f.Count("AddPortMapping")
+	clk.Step(6 * time.Second) // past half of the 10s lease
+	s.eventually("renewed", func() bool { return s.f.Count("AddPortMapping") > adds })
+	if s.rec.has("PortConflict") {
+		t.Fatalf("own mapping reported as a conflict: %v", s.rec.snapshot())
+	}
+}
+
+func TestScenario_FormerPrefixAdopted(t *testing.T) { // cutover from upnp-nat-controller/ descriptions
+	s := startScenario(t, scenarioOpts{})
+	s.f.AddMapping(fakeigd.Mapping{Protocol: "TCP", ExternalPort: 443, InternalPort: 443, InternalClient: lbIP, Enabled: true,
+		Description: mapping.FormerPrefix + s.ns + "/lb"})
+	managedLB(t, s.ns, "lb", lbIP)
+	desc := mapping.DefaultDescriptions.For(mapping.Owner{Namespace: s.ns, Name: "lb"})
+	s.eventually("adopted under the new prefix", s.hasPorts(desc, "TCP/443->"+lbIP+":443", "TCP/32400->"+lbIP+":32400"))
+	if len(s.f.Mappings()) != 2 || s.rec.has("PortConflict") {
+		t.Fatalf("mappings %v, conflict %v", s.ports(""), s.rec.has("PortConflict"))
 	}
 }

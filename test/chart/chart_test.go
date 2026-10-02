@@ -27,7 +27,7 @@ func helm(t *testing.T, args ...string) string {
 		t.Skip("helm not on PATH")
 	}
 	var out, stderr bytes.Buffer
-	cmd := exec.Command("helm", args...)
+	cmd := exec.CommandContext(t.Context(), "helm", args...)
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("helm %v: %v\n%s", args, err, stderr.String())
@@ -75,7 +75,7 @@ func TestChart_RBACGolden(t *testing.T) { // M9, D12
 	got := helm(t, "template", "upnp-nat-controller", chartDir, "--namespace", "upnp", "--show-only", "templates/rbac.yaml")
 	golden := filepath.Join("testdata", "rbac.golden.yaml")
 	if *update {
-		if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
+		if err := os.WriteFile(golden, []byte(got), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -119,11 +119,12 @@ func TestChart_Deployment(t *testing.T) { // M9, NFR-OPS-1/2/6/7, NFR-SEC-1
 		t.Errorf("replicas %d", *d.Spec.Replicas)
 	}
 	c := spec.Containers[0]
-	if c.Image != "nashant/upnp-nat-controller:v0.1.0" {
+	if c.Image != "ghcr.io/nashant/upnp-nat-controller:0.1.0" {
 		t.Errorf("image %s, want appVersion tag", c.Image)
 	}
 	for _, a := range []string{"--leader-elect=true", "--resync-interval=30s", "--lease-duration=3600", "--soap-timeout=5s",
-		"--finalizer-timeout=10m", "--metrics-bind-address=:8080", "--health-probe-bind-address=:8081"} {
+		"--finalizer-timeout=10m", "--metrics-bind-address=:8080", "--health-probe-bind-address=:8081",
+		"--description-prefix=unc/", "--rate-limit=5", "--rate-burst=10"} {
 		if !slices.Contains(c.Args, a) {
 			t.Errorf("args %v missing %s", c.Args, a)
 		}
@@ -190,7 +191,7 @@ func TestChart_Kubeconform(t *testing.T) {
 		t.Skip("kubeconform not on PATH")
 	}
 	m := render(t, "--set", "metrics.serviceMonitor.enabled=true")
-	cmd := exec.Command("kubeconform", "-strict", "-summary", "-ignore-missing-schemas", "-")
+	cmd := exec.CommandContext(t.Context(), "kubeconform", "-strict", "-summary", "-ignore-missing-schemas", "-")
 	cmd.Stdin = strings.NewReader(m)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

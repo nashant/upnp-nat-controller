@@ -44,6 +44,9 @@ spec:
             - --lease-duration={{ .Values.controller.leaseDuration | int64 }}
             - --soap-timeout={{ .Values.controller.soapTimeout }}
             - --finalizer-timeout={{ .Values.controller.finalizerTimeout }}
+            - --description-prefix={{ .Values.controller.descriptionPrefix }}
+            - --rate-limit={{ .Values.controller.rateLimit }}
+            - --rate-burst={{ .Values.controller.rateBurst }}
             - --metrics-bind-address=:{{ .Values.ports.metrics }}
             - --health-probe-bind-address=:{{ .Values.ports.health }}
             - --zap-log-level={{ .Values.controller.logLevel }}

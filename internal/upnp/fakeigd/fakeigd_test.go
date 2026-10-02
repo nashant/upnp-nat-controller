@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -377,5 +378,24 @@ func TestFakeIGD_ClearMappingsKeepsUptime(t *testing.T) {
 	}
 	if _, _, up, _ := c.GetStatusInfoCtx(ctx); up != 60 {
 		t.Fatalf("uptime %d, want 60", up)
+	}
+}
+
+func TestFakeIGD_TruncatesDescriptionTo63Bytes(t *testing.T) { // like miniupnpd on pf (PF_RULE_LABEL_SIZE 64)
+	f := fakeigd.New(t)
+	c := ipConn(t, f)
+	long := strings.Repeat("d", 80)
+	if err := add(t, c, 443, "172.16.1.2", long, 0); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, desc, _, err := c.GetSpecificPortMappingEntryCtx(ctx, "", 443, "TCP")
+	if err != nil || desc != long[:63] {
+		t.Fatalf("desc %q (%d bytes), %v; want first 63 bytes", desc, len(desc), err)
+	}
+	f.AddMapping(fakeigd.Mapping{Protocol: "TCP", ExternalPort: 80, InternalPort: 80, InternalClient: "192.168.1.5", Description: long})
+	for _, m := range f.Mappings() {
+		if len(m.Description) > 63 {
+			t.Fatalf("AddMapping kept %d bytes", len(m.Description))
+		}
 	}
 }
