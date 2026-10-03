@@ -5,6 +5,7 @@
       "release-type": "go",
       "package-name": "upnp-nat-controller",
       "include-v-in-tag": true,
+      "include-component-in-tag": false,
       "bump-minor-pre-major": true,
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
