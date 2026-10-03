@@ -160,6 +160,36 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
+  # Publishes the chart for a release tag, once its image is pushed, so the
+  # chart's appVersion always names an image that exists.
+  chart:
+    needs: [image]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - name: Package and push
+        env:
+          TAG: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ github.token }}
+          CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
+        run: |
+          version="$(helm show chart helm | sed -n 's/^version: //p')"
+          if [ "v${version}" != "$TAG" ]; then
+            echo "::error::helm/Chart.yaml version ${version} does not match tag ${TAG}"
+            exit 1
+          fi
+          echo "$REGISTRY_TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
+          helm package helm --destination dist
+          helm push "dist/upnp-nat-controller-${version}.tgz" "$CHART_REPO"
+
   # Scans a release image after it is pushed, and rescans the latest release
   # weekly for newly published CVEs. It holds no secrets.
   image-scan:

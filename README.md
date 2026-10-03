@@ -96,7 +96,14 @@ Images are published to `ghcr.io/nashant/upnp-nat-controller`:
 - each push to `main` gets a `sha-<commit>` tag;
 - each release gets a `<version>` tag, with a signed provenance attestation and an SBOM.
 
-release-please keeps a release PR open that bumps `version` and `appVersion` in `helm/Chart.yaml`. Merging it tags the release, and Flux deploys the new chart version. PR titles must be Conventional Commits (`feat: …`, `fix: …`).
+Each release also publishes the chart to `oci://ghcr.io/nashant/charts/upnp-nat-controller`, at the same version:
+
+```console
+helm install upnp-nat-controller oci://ghcr.io/nashant/charts/upnp-nat-controller \
+  --namespace upnp-nat-controller --create-namespace
+```
+
+release-please keeps a release PR open that bumps `version` and `appVersion` in `helm/Chart.yaml`. Merging it tags the release. PR titles must be Conventional Commits (`feat: …`, `fix: …`).
 
 ## Development
 
