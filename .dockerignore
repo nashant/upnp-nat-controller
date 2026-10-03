@@ -1,0 +1,7 @@
+.git/
+bin/
+cover.out
+.superpowers/
+docs/
+helm/
+test/

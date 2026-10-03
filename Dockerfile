@@ -1,16 +1,14 @@
-FROM python:3.9-slim-bullseye
+FROM --platform=$BUILDPLATFORM golang:1.27 AS build
+ARG TARGETOS TARGETARCH
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY api/ api/
+COPY cmd/ cmd/
+COPY internal/ internal/
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /manager ./cmd
 
-EXPOSE 8080/tcp
-
-ADD src /app
-
-RUN apt-get update \
- && apt-get upgrade -y \
- && apt-get install -y vim \
- && pip install --upgrade pip \
- && pip install -r /app/requirements.txt \
- && useradd -mb /tmp -s /bin/bash -u 1000 kopf \
- && chown -R kopf /app
-USER kopf
-WORKDIR /app
-ENTRYPOINT [ "kopf", "run", "--all-namespaces", "./controller.py"]
+FROM gcr.io/distroless/static:nonroot
+COPY --from=build /manager /manager
+USER 65532:65532
+ENTRYPOINT ["/manager"]

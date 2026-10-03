@@ -1,0 +1,66 @@
+name: chart-install
+
+# Installs the chart into kind with an image built from this commit and waits
+# for the pod to become ready: the CRD installs, RBAC lets the informers
+# sync, and the probes pass. There is no router, so the controller starts
+# with Discovered=False.
+on:
+  pull_request:
+    paths:
+      - 'helm/**'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'api/**'
+      - 'Dockerfile'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/chart-install.yml'
+
+permissions: {}
+
+jobs:
+  install:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: upnp-nat-controller:ci
+          cache-from: type=gha
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          cluster_name: chart-install
+      - name: Load the image into kind
+        run: kind load docker-image upnp-nat-controller:ci --name chart-install
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - name: Install and wait for Ready
+        run: |
+          kubectl create namespace upnp
+          helm install upnp-nat-controller ./helm --namespace upnp --wait --timeout 5m \
+            --set image.repository=upnp-nat-controller --set image.tag=ci --set image.pullPolicy=Never
+          kubectl -n upnp rollout status deploy/upnp-nat-controller --timeout 2m
+      - name: The IGD resource exists and reports no router
+        run: |
+          for _ in $(seq 1 30); do
+            if kubectl get internetgatewaydevices.gateway.nashes.uk default \
+                -o jsonpath='{.status.conditions[?(@.type=="Discovered")].status}' 2>/dev/null | grep -q False; then
+              exit 0
+            fi
+            sleep 5
+          done
+          kubectl get internetgatewaydevices.gateway.nashes.uk default -o yaml || true
+          exit 1
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl -n upnp get all
+          kubectl -n upnp describe pods
+          kubectl -n upnp logs deploy/upnp-nat-controller --tail=200 || true

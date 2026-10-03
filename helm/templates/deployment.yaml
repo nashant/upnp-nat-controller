@@ -6,6 +6,9 @@ metadata:
     {{- include "upnp-nat-controller.labels" . | nindent 4 }}
 spec:
   replicas: 1
+  # hostNetwork makes the ports hostPorts, so old and new pods cannot overlap on a node.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "upnp-nat-controller.selectorLabels" . | nindent 6 }}
@@ -25,26 +28,57 @@ spec:
       serviceAccountName: {{ include "upnp-nat-controller.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      dnsPolicy: ClusterFirst
+      # SSDP discovery needs the node's LAN interface.
       hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      terminationGracePeriodSeconds: 10
       containers:
-        - name: {{ .Chart.Name }}
+        - name: manager
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --leader-elect={{ .Values.controller.leaderElect }}
+            - --resync-interval={{ .Values.controller.resyncInterval }}
+            - --lease-duration={{ .Values.controller.leaseDuration | int64 }}
+            - --soap-timeout={{ .Values.controller.soapTimeout }}
+            - --finalizer-timeout={{ .Values.controller.finalizerTimeout }}
+            - --description-prefix={{ .Values.controller.descriptionPrefix }}
+            - --rate-limit={{ .Values.controller.rateLimit }}
+            - --rate-burst={{ .Values.controller.rateBurst }}
+            - --metrics-bind-address=:{{ .Values.ports.metrics }}
+            - --health-probe-bind-address=:{{ .Values.ports.health }}
+            - --zap-log-level={{ .Values.controller.logLevel }}
+            {{- with .Values.controller.igdURL }}
+            - --igd-url={{ . }}
+            {{- end }}
+            {{- range .Values.controller.extraArgs }}
+            - {{ . }}
+            {{- end }}
           ports:
-            - name: http
-              containerPort: 80
+            - name: metrics
+              containerPort: {{ .Values.ports.metrics }}
               protocol: TCP
-          #livenessProbe:
-          #  httpGet:
-          #    path: /
-          #    port: http
-          #readinessProbe:
-          #  httpGet:
-          #    path: /
-          #    port: http
+            - name: health
+              containerPort: {{ .Values.ports.health }}
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}
