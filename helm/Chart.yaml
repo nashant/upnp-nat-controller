@@ -2,5 +2,5 @@ apiVersion: v2
 name: upnp-nat-controller
 description: Keeps UPnP port mappings on the router for annotated LoadBalancer Services
 type: application
-version: 0.1.0
-appVersion: 0.1.0
+version: 0.2.0
+appVersion: 0.2.0
