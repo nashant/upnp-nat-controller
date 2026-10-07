@@ -5,10 +5,10 @@ kind: ClusterRole
 metadata:
   name: upnp-nat-controller
   labels:
-    helm.sh/chart: upnp-nat-controller-0.1.0
+    helm.sh/chart: upnp-nat-controller-VERSION
     app.kubernetes.io/name: upnp-nat-controller
     app.kubernetes.io/instance: upnp-nat-controller
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "VERSION"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: [""]
@@ -33,10 +33,10 @@ kind: ClusterRoleBinding
 metadata:
   name: upnp-nat-controller
   labels:
-    helm.sh/chart: upnp-nat-controller-0.1.0
+    helm.sh/chart: upnp-nat-controller-VERSION
     app.kubernetes.io/name: upnp-nat-controller
     app.kubernetes.io/instance: upnp-nat-controller
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "VERSION"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -54,10 +54,10 @@ metadata:
   name: upnp-nat-controller-leader-election
   namespace: upnp
   labels:
-    helm.sh/chart: upnp-nat-controller-0.1.0
+    helm.sh/chart: upnp-nat-controller-VERSION
     app.kubernetes.io/name: upnp-nat-controller
     app.kubernetes.io/instance: upnp-nat-controller
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "VERSION"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups: ["coordination.k8s.io"]
@@ -71,10 +71,10 @@ metadata:
   name: upnp-nat-controller-leader-election
   namespace: upnp
   labels:
-    helm.sh/chart: upnp-nat-controller-0.1.0
+    helm.sh/chart: upnp-nat-controller-VERSION
     app.kubernetes.io/name: upnp-nat-controller
     app.kubernetes.io/instance: upnp-nat-controller
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "VERSION"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
