@@ -1,7 +1,8 @@
 # upnp-nat-controller
 
 A Kubernetes controller that keeps UPnP port mappings on your router for
-annotated `LoadBalancer` Services. Mappings are reconciled every
+annotated `LoadBalancer` (or, with `--service-types`, `ClusterIP`) Services.
+Mappings are reconciled every
 `--resync-interval` (30s), so they come back on their own after a router
 reboot, a UPnP daemon restart, a WAN reconnect or a lease expiry.
 
@@ -16,8 +17,9 @@ reboot, a UPnP daemon restart, a WAN reconnect or a lease expiry.
 | `advertise.upnp/lease-seconds` | Lease to request; default `--lease-duration` (3600). `0` asks for a permanent mapping. Otherwise it must be longer than twice `--resync-interval`. Mappings are renewed at half their lease |
 
 `INT` must be one of the Service's `spec.ports[].port` for that protocol. The
-router forwards `EXT` to the first IPv4 address in
-`status.loadBalancer.ingress` on port `INT`.
+router forwards `EXT` to port `INT` on the first IPv4 address in
+`status.loadBalancer.ingress` of a `LoadBalancer`, or on the `spec.clusterIP`
+of a `ClusterIP` Service. Headless Services can't be mapped.
 
 ```yaml
 apiVersion: v1
@@ -40,8 +42,8 @@ description, so longer ones are cut and end in `~` plus an 8-character
 hash. Mappings described `upnp-nat-controller/<namespace>/<name>` (earlier
 releases) or `<namespace>/<name>` (the Python controller) are adopted.
 Mappings with any other description are never changed; a clash raises a
-`PortConflict` event on the Service. Annotated Services that are not
-`LoadBalancer` get a `NotLoadBalancer` event.
+`PortConflict` event on the Service. Annotated Services of a type not in
+`--service-types` get an `UnsupportedServiceType` event.
 
 Managed Services carry the finalizer `upnp.nashes.uk/port-mappings`. On
 deletion the controller removes their mappings; if the router stays
@@ -71,6 +73,7 @@ Service immediately.
 | `--soap-timeout` | `5s` | Per router request |
 | `--finalizer-timeout` | `10m` | |
 | `--rate-limit` / `--rate-burst` | `5` / `10` | Router requests per second |
+| `--service-types` | `LoadBalancer` | Comma-separated: `LoadBalancer`, `ClusterIP` (chart value `controller.serviceTypes`) |
 | `--leader-elect` | `true` | |
 | `--metrics-bind-address` / `--health-probe-bind-address` | `:8080` / `:8081` | |
 
@@ -80,13 +83,15 @@ can answer.
 
 ## Router prerequisites
 
-The controller asks the router to forward to the Service's LoadBalancer IP,
-not to its own (node) address. On OPNsense (Services → UPnP & NAT-PMP):
+The controller asks the router to forward to the Service's LoadBalancer IP
+or cluster IP, not to its own (node) address. For `ClusterIP` Services the
+router needs a route to the Service CIDR (for example via BGP or a static
+route to a node). On OPNsense (Services → UPnP & NAT-PMP):
 
 - **Allow third-party mapping** must be set to UPnP IGD. Otherwise miniupnpd
   runs in secure mode and refuses every mapping (UPnP error 606).
 - If **Default deny** is on, add allow rules covering the LoadBalancer IP
-  range and the external ports, including ports below 1024.
+  range (and the Service CIDR, for `ClusterIP`) and the external ports, including ports below 1024.
 
 Ports the router itself listens on (web GUI, SSH, VPN) can't be mapped.
 

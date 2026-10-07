@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"sync"
 	"time"
 
@@ -50,7 +51,7 @@ const (
 )
 
 // ServiceReconciler keeps the router's port mappings in line with the
-// annotations of each managed LoadBalancer Service. Every successful pass
+// annotations of each managed Service. Every successful pass
 // requeues after ResyncInterval, so mappings lost on the router side are
 // restored without any Service event.
 type ServiceReconciler struct {
@@ -63,15 +64,18 @@ type ServiceReconciler struct {
 	OnPass func()
 	// Names builds and recognises mapping descriptions; zero means the defaults.
 	Names mapping.Descriptions
+	// ServiceTypes are the Service types that are mapped; empty means
+	// LoadBalancer only.
+	ServiceTypes []corev1.ServiceType
 
 	ResyncInterval   time.Duration // requeue after a good pass (30s)
 	RetryInterval    time.Duration // requeue while the router is unreachable (10s)
-	IPWaitInterval   time.Duration // requeue while waiting for an LB IP (5s)
+	IPWaitInterval   time.Duration // requeue while waiting for a target IP (5s)
 	DefaultLease     uint32        // seconds (3600)
 	FinalizerTimeout time.Duration // give up on cleanup during deletion (10m)
 
 	mu sync.Mutex
-	// waiting holds Services that already got a WaitingForIP event.
+	// waiting holds the reason each Service last got a no-target-IP event for.
 	waiting map[types.UID]string
 	// seen holds the mappings each Service had on the router at its last
 	// pass, to tell a drift repair from a first add.
@@ -120,12 +124,13 @@ func (r *ServiceReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	managed := annotations.IsManaged(svc.Annotations)
-	isLB := svc.Spec.Type == corev1.ServiceTypeLoadBalancer
-	if managed && !isLB {
-		r.Recorder.Eventf(&svc, nil, corev1.EventTypeWarning, "NotLoadBalancer", "Reconcile",
-			"Service has %s annotations but type %s; only LoadBalancer Services are mapped", "advertise.upnp", svc.Spec.Type)
+	mappedTypes := r.serviceTypes()
+	mapped := slices.Contains(mappedTypes, svc.Spec.Type)
+	if managed && !mapped {
+		r.Recorder.Eventf(&svc, nil, corev1.EventTypeWarning, "UnsupportedServiceType", "Reconcile",
+			"Service has %s annotations but type %s; mapped types are %v", "advertise.upnp", svc.Spec.Type, mappedTypes)
 	}
-	if !managed || !isLB || !svc.DeletionTimestamp.IsZero() {
+	if !managed || !mapped || !svc.DeletionTimestamp.IsZero() {
 		// A Service deleted while it still carries the kopf finalizer gets
 		// the same cleanup as ours: it may own Python controller mappings.
 		if !controllerutil.ContainsFinalizer(&svc, Finalizer) && !controllerutil.ContainsFinalizer(&svc, LegacyFinalizer) {
@@ -147,7 +152,7 @@ func (r *ServiceReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, resultInvalid, nil
 	}
 
-	ip, ok := r.ingressIP(&svc)
+	ip, ok := r.targetIP(&svc)
 	if !ok {
 		// Without an IPv4 target, mappings made for the previous IP must go:
 		// the LB pool may hand that IP to another Service.
@@ -185,24 +190,40 @@ func (r *ServiceReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{RequeueAfter: r.ResyncInterval}, resultSuccess, nil
 }
 
-// ingressIP returns the first IPv4 ingress address. It emits one
-// WaitingForIP event per Service while there is no ingress at all.
-func (r *ServiceReconciler) ingressIP(svc *corev1.Service) (string, bool) {
-	ingress := svc.Status.LoadBalancer.Ingress
-	for _, in := range ingress {
-		if a, err := netip.ParseAddr(in.IP); err == nil && a.Is4() {
-			r.mu.Lock()
-			delete(r.waiting, svc.UID)
-			r.mu.Unlock()
-			return a.String(), true
-		}
+// serviceTypes returns the Service types that are mapped.
+func (r *ServiceReconciler) serviceTypes() []corev1.ServiceType {
+	if len(r.ServiceTypes) == 0 {
+		return []corev1.ServiceType{corev1.ServiceTypeLoadBalancer}
 	}
-	reason, typ, msg := "WaitingForIP", corev1.EventTypeNormal, "waiting for a LoadBalancer IP"
-	if len(ingress) > 0 {
-		reason, typ, msg = "NoIPv4Ingress", corev1.EventTypeWarning, "LoadBalancer ingress has no IPv4 address; UPnP mappings need one"
+	return r.ServiceTypes
+}
+
+// targetIP returns the IPv4 address the router forwards to: the first IPv4
+// ingress address of a LoadBalancer, or the cluster IP of a ClusterIP
+// Service. Without one it emits one event per Service and reason.
+func (r *ServiceReconciler) targetIP(svc *corev1.Service) (string, bool) {
+	var candidates []string
+	reason, typ, msg := "NoIPv4ClusterIP", corev1.EventTypeWarning, "Service has no IPv4 cluster IP; UPnP mappings need one"
+	switch svc.Spec.Type {
+	case corev1.ServiceTypeClusterIP:
+		candidates = []string{svc.Spec.ClusterIP}
+	case corev1.ServiceTypeLoadBalancer:
+		for _, in := range svc.Status.LoadBalancer.Ingress {
+			candidates = append(candidates, in.IP)
+		}
+		reason, typ, msg = "WaitingForIP", corev1.EventTypeNormal, "waiting for a LoadBalancer IP"
+		if len(candidates) > 0 {
+			reason, typ, msg = "NoIPv4Ingress", corev1.EventTypeWarning, "LoadBalancer ingress has no IPv4 address; UPnP mappings need one"
+		}
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for _, c := range candidates {
+		if a, err := netip.ParseAddr(c); err == nil && a.Is4() {
+			delete(r.waiting, svc.UID)
+			return a.String(), true
+		}
+	}
 	if r.waiting == nil {
 		r.waiting = map[types.UID]string{}
 	}

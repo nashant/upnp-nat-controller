@@ -351,11 +351,11 @@ func TestScenario_PortListChanged(t *testing.T) {
 	}
 }
 
-func TestScenario_NotLoadBalancer(t *testing.T) {
+func TestScenario_UnsupportedServiceType(t *testing.T) {
 	s := startScenario(t, scenarioOpts{})
 	createService(t, s.ns, "plex", corev1.ServiceTypeClusterIP,
 		map[string]string{annotations.TCPEnabled: "true", annotations.TCPPorts: "32400"}, tcpPort(32400))
-	s.eventually("NotLoadBalancer event", func() bool { return s.rec.has("NotLoadBalancer") })
+	s.eventually("UnsupportedServiceType event", func() bool { return s.rec.has("UnsupportedServiceType") })
 	if n := len(s.f.Requests()); n != 0 {
 		t.Fatalf("router saw %d requests", n)
 	}

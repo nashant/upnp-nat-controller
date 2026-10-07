@@ -22,6 +22,10 @@ controller:
   # Router requests per second, and burst.
   rateLimit: 5
   rateBurst: 10
+  # Service types to map. LoadBalancer forwards to the ingress IP; ClusterIP
+  # forwards to the cluster IP, so the router needs a route to the Service CIDR.
+  serviceTypes:
+    - LoadBalancer
   leaderElect: true
   logLevel: info
   extraArgs: []

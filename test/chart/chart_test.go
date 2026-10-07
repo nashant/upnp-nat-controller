@@ -198,3 +198,19 @@ func TestChart_Kubeconform(t *testing.T) {
 		t.Fatalf("kubeconform: %v\n%s", err, out)
 	}
 }
+
+func TestChart_ServiceTypesValue(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "--service-types=LoadBalancer"},
+		{[]string{"--set", "controller.serviceTypes={LoadBalancer,ClusterIP}"}, "--service-types=LoadBalancer,ClusterIP"},
+	} {
+		var d appsv1.Deployment
+		find(t, render(t, tc.args...), "Deployment", &d)
+		if args := d.Spec.Template.Spec.Containers[0].Args; !slices.Contains(args, tc.want) {
+			t.Errorf("%v: args %v missing %s", tc.args, args, tc.want)
+		}
+	}
+}
