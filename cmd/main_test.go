@@ -1,8 +1,11 @@
 package main
 
 import (
+	"slices"
 	"testing"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestFlags_Defaults(t *testing.T) {
@@ -65,5 +68,27 @@ func TestFlags_DescriptionPrefixAndPermanentLease(t *testing.T) {
 	}
 	if o.DescriptionPrefix != "k8s/" || o.LeaseDuration != 0 {
 		t.Fatalf("got %+v", o)
+	}
+}
+
+func TestFlags_ServiceTypes(t *testing.T) {
+	o, err := parseFlags(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(o.ServiceTypes, []corev1.ServiceType{corev1.ServiceTypeLoadBalancer}) {
+		t.Fatalf("default service types %v", o.ServiceTypes)
+	}
+	o, err = parseFlags([]string{"--service-types=LoadBalancer, ClusterIP"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(o.ServiceTypes, []corev1.ServiceType{corev1.ServiceTypeLoadBalancer, corev1.ServiceTypeClusterIP}) {
+		t.Fatalf("service types %v", o.ServiceTypes)
+	}
+	for _, v := range []string{"", "NodePort", "ExternalName", "LoadBalancer,", "loadbalancer"} {
+		if _, err := parseFlags([]string{"--service-types=" + v}); err == nil {
+			t.Errorf("--service-types=%q: want error", v)
+		}
 	}
 }

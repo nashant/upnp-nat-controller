@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/time/rate"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -47,6 +49,7 @@ type Options struct {
 	DescriptionPrefix string
 	RateLimit         float64
 	RateBurst         int
+	ServiceTypes      []corev1.ServiceType
 	Zap               zap.Options
 
 	// skipNameValidation lets tests start the manager more than once per process.
@@ -58,6 +61,7 @@ func parseFlags(args []string) (Options, error) {
 		o      Options
 		igdURL string
 		lease  int64
+		types  string
 	)
 	fs := flag.NewFlagSet("manager", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -73,6 +77,7 @@ func parseFlags(args []string) (Options, error) {
 	fs.StringVar(&o.DescriptionPrefix, "description-prefix", mapping.DefaultPrefix, "Prefix of the port mapping descriptions that mark mappings as this controller's. Mappings under the previous default ("+mapping.FormerPrefix+") are adopted.")
 	fs.Float64Var(&o.RateLimit, "rate-limit", 5, "Router requests per second.")
 	fs.IntVar(&o.RateBurst, "rate-burst", 10, "Router request burst.")
+	fs.StringVar(&types, "service-types", string(corev1.ServiceTypeLoadBalancer), "Comma-separated Service types to map: LoadBalancer (to the ingress IP) and/or ClusterIP (to the cluster IP, which the router must be able to route to).")
 	o.Zap.BindFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return Options{}, err
@@ -106,6 +111,14 @@ func parseFlags(args []string) (Options, error) {
 	}
 	if o.SOAPTimeout <= 0 {
 		errs = append(errs, errors.New("--soap-timeout must be positive"))
+	}
+	for _, t := range strings.Split(types, ",") {
+		switch t := corev1.ServiceType(strings.TrimSpace(t)); t {
+		case corev1.ServiceTypeLoadBalancer, corev1.ServiceTypeClusterIP:
+			o.ServiceTypes = append(o.ServiceTypes, t)
+		default:
+			errs = append(errs, fmt.Errorf("--service-types: %q is not LoadBalancer or ClusterIP", t))
+		}
 	}
 	return o, errors.Join(errs...)
 }
@@ -172,7 +185,7 @@ func run(ctx context.Context, cfg *rest.Config, o Options, reg prometheus.Regist
 		K8s: mgr.GetClient(), UPnP: router, Recorder: rec,
 		Clock: clk, Metrics: m, Names: descriptions(o.DescriptionPrefix), OnPass: func() { tracker.Beat("service-reconciler", o.ResyncInterval) },
 		ResyncInterval: o.ResyncInterval, RetryInterval: 10 * time.Second, IPWaitInterval: 5 * time.Second,
-		DefaultLease: o.LeaseDuration, FinalizerTimeout: o.FinalizerTimeout,
+		DefaultLease: o.LeaseDuration, FinalizerTimeout: o.FinalizerTimeout, ServiceTypes: o.ServiceTypes,
 	}
 	if err := r.SetupWithManager(mgr, controller.Options{SkipNameValidation: &o.skipNameValidation}, resync.Source(), heartbeat.Source()); err != nil {
 		return fmt.Errorf("set up Service controller: %w", err)

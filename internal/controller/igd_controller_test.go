@@ -99,12 +99,17 @@ func drainEvents(rec *evts.FakeRecorder) []string {
 }
 
 func hasEvent(evs []string, reason string) bool {
+	return countEvents(evs, reason) > 0
+}
+
+func countEvents(evs []string, reason string) int {
+	n := 0
 	for _, e := range evs {
 		if strings.Contains(e, " "+reason+" ") {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 func TestIGD_CreatesDefaultCR(t *testing.T) {

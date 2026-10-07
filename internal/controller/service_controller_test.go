@@ -177,7 +177,7 @@ func TestReconcile_MissingService_NoError(t *testing.T) {
 	}
 }
 
-func TestReconcile_NotLoadBalancer_WarningEvent(t *testing.T) {
+func TestReconcile_ClusterIPNotEnabled_WarningEvent(t *testing.T) {
 	h := newSvcHarness(t)
 	ns := newNamespace(t)
 	svc := createService(t, ns, "plex", corev1.ServiceTypeClusterIP,
@@ -185,11 +185,74 @@ func TestReconcile_NotLoadBalancer_WarningEvent(t *testing.T) {
 	if res := h.reconcile(t, svc); res != (reconcile.Result{}) {
 		t.Fatalf("result %+v, want no requeue", res)
 	}
-	if !hasEvent(drainEvents(h.rec), "NotLoadBalancer") {
-		t.Fatal("no NotLoadBalancer event")
+	if !hasEvent(drainEvents(h.rec), "UnsupportedServiceType") {
+		t.Fatal("no UnsupportedServiceType event")
 	}
 	if n := routerCalls(h.router); n != 0 {
 		t.Fatalf("router calls %d", n)
+	}
+}
+
+func managedClusterIP(t *testing.T, ns, name, clusterIP string) *corev1.Service {
+	t.Helper()
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name,
+			Annotations: map[string]string{annotations.TCPEnabled: "true", annotations.TCPPorts: "32400"}},
+		Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: clusterIP,
+			Ports: []corev1.ServicePort{tcpPort(32400)}, Selector: map[string]string{"app": name}},
+	}
+	if err := k8s.Create(bg, svc); err != nil {
+		t.Fatal(err)
+	}
+	return svc
+}
+
+func TestReconcile_ClusterIPEnabled_MapsToClusterIP(t *testing.T) {
+	h := newSvcHarness(t)
+	h.r.ServiceTypes = []corev1.ServiceType{corev1.ServiceTypeLoadBalancer, corev1.ServiceTypeClusterIP}
+	ns := newNamespace(t)
+	svc := managedClusterIP(t, ns, "plex", "")
+	ip := getSvc(t, svc).Spec.ClusterIP
+	if res := h.reconcile(t, svc); res.RequeueAfter != 30*time.Second {
+		t.Fatalf("result %+v", res)
+	}
+	ms := h.router.Mappings()
+	if len(ms) != 1 || ms[0].ExternalPort != 32400 || ms[0].InternalPort != 32400 || ms[0].InternalClient != ip {
+		t.Fatalf("mappings %+v, want 32400 -> %s:32400", ms, ip)
+	}
+	if !controllerutil.ContainsFinalizer(getSvc(t, svc), Finalizer) {
+		t.Fatal("no finalizer")
+	}
+}
+
+func TestReconcile_HeadlessClusterIP_EventNoMappings(t *testing.T) {
+	h := newSvcHarness(t)
+	h.r.ServiceTypes = []corev1.ServiceType{corev1.ServiceTypeClusterIP}
+	ns := newNamespace(t)
+	svc := managedClusterIP(t, ns, "headless", corev1.ClusterIPNone)
+	for i := 0; i < 2; i++ {
+		if res := h.reconcile(t, svc); res.RequeueAfter != 5*time.Second {
+			t.Fatalf("result %+v", res)
+		}
+	}
+	if n := countEvents(drainEvents(h.rec), "NoIPv4ClusterIP"); n != 1 {
+		t.Fatalf("NoIPv4ClusterIP events %d, want 1", n)
+	}
+	if n := routerCalls(h.router); n != 0 {
+		t.Fatalf("router calls %d", n)
+	}
+}
+
+func TestReconcile_LoadBalancerStillUsesIngressWhenClusterIPEnabled(t *testing.T) {
+	h := newSvcHarness(t)
+	h.r.ServiceTypes = []corev1.ServiceType{corev1.ServiceTypeLoadBalancer, corev1.ServiceTypeClusterIP}
+	ns := newNamespace(t)
+	svc := managedLB(t, ns, "lb", lbIP)
+	h.reconcile(t, svc)
+	for _, m := range h.router.Mappings() {
+		if m.InternalClient != lbIP {
+			t.Fatalf("mapping %+v, want ingress IP %s", m, lbIP)
+		}
 	}
 }
 
@@ -203,13 +266,7 @@ func TestReconcile_NoIngressIP_RequeuesAfter5s(t *testing.T) {
 		}
 	}
 	evs := drainEvents(h.rec)
-	n := 0
-	for _, e := range evs {
-		if hasEvent([]string{e}, "WaitingForIP") {
-			n++
-		}
-	}
-	if n != 1 {
+	if n := countEvents(evs, "WaitingForIP"); n != 1 {
 		t.Fatalf("WaitingForIP events %d, want 1: %v", n, evs)
 	}
 	if routerCalls(h.router) != 0 {
@@ -502,8 +559,8 @@ func TestReconcile_TypeChangedToClusterIP_CleansUp(t *testing.T) {
 	if len(h.router.Mappings()) != 0 || controllerutil.ContainsFinalizer(getSvc(t, svc), Finalizer) {
 		t.Fatal("not cleaned up")
 	}
-	if !hasEvent(drainEvents(h.rec), "NotLoadBalancer") {
-		t.Fatal("no NotLoadBalancer event")
+	if !hasEvent(drainEvents(h.rec), "UnsupportedServiceType") {
+		t.Fatal("no UnsupportedServiceType event")
 	}
 }
 

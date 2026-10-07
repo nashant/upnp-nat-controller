@@ -47,6 +47,7 @@ spec:
             - --description-prefix={{ .Values.controller.descriptionPrefix }}
             - --rate-limit={{ .Values.controller.rateLimit }}
             - --rate-burst={{ .Values.controller.rateBurst }}
+            - --service-types={{ join "," .Values.controller.serviceTypes }}
             - --metrics-bind-address=:{{ .Values.ports.metrics }}
             - --health-probe-bind-address=:{{ .Values.ports.health }}
             - --zap-log-level={{ .Values.controller.logLevel }}
