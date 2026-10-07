@@ -67,12 +67,26 @@ func find(t *testing.T, manifest, kind string, into any) bool {
 	return false
 }
 
+// chartMeta returns the chart's Chart.yaml, so tests don't pin a release.
+func chartMeta(t *testing.T) (version, appVersion string) {
+	t.Helper()
+	var meta struct{ Version, AppVersion string }
+	if err := yaml.Unmarshal([]byte(helm(t, "show", "chart", chartDir)), &meta); err != nil {
+		t.Fatal(err)
+	}
+	return meta.Version, meta.AppVersion
+}
+
 func TestChart_Lint(t *testing.T) {
 	helm(t, "lint", chartDir, "--strict")
 }
 
 func TestChart_RBACGolden(t *testing.T) {
 	got := helm(t, "template", "upnp-nat-controller", chartDir, "--namespace", "upnp", "--show-only", "templates/rbac.yaml")
+	// The golden file holds VERSION where the chart version goes, so a
+	// release bump doesn't change it.
+	version, _ := chartMeta(t)
+	got = strings.ReplaceAll(got, version, "VERSION")
 	golden := filepath.Join("testdata", "rbac.golden.yaml")
 	if *update {
 		if err := os.WriteFile(golden, []byte(got), 0o600); err != nil {
@@ -119,7 +133,7 @@ func TestChart_Deployment(t *testing.T) {
 		t.Errorf("replicas %d", *d.Spec.Replicas)
 	}
 	c := spec.Containers[0]
-	if c.Image != "ghcr.io/nashant/upnp-nat-controller:0.1.0" {
+	if _, appVersion := chartMeta(t); c.Image != "ghcr.io/nashant/upnp-nat-controller:"+appVersion {
 		t.Errorf("image %s, want appVersion tag", c.Image)
 	}
 	for _, a := range []string{"--leader-elect=true", "--resync-interval=30s", "--lease-duration=3600", "--soap-timeout=5s",
