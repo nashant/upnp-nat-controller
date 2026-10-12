@@ -29,9 +29,15 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
       - name: Auto-merge the release PR
-        if: steps.release.outputs.pr
+        if: steps.release.outputs.prs_created == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
-          PR: ${{ fromJSON(steps.release.outputs.pr).number }}
-        run: gh pr merge "$PR" --auto --squash
+          PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          pr="$(jq -r '.number // empty' <<<"${PR_JSON:-null}")"
+          if [ -z "$pr" ]; then
+            echo "no release PR"
+            exit 0
+          fi
+          gh pr merge "$pr" --auto --squash
