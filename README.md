@@ -108,7 +108,9 @@ helm install upnp-nat-controller oci://ghcr.io/nashant/charts/upnp-nat-controlle
   --namespace upnp-nat-controller --create-namespace
 ```
 
-release-please keeps a release PR open that bumps `version` and `appVersion` in `helm/Chart.yaml`. Merging it tags the release. PR titles must be Conventional Commits (`feat: …`, `fix: …`).
+release-please keeps a release PR open that bumps `version` and `appVersion` in `helm/Chart.yaml` and auto-merges it once its checks pass. PR titles must be Conventional Commits (`feat: …`, `fix: …`).
+
+Renovate auto-merges patch, digest, indirect Go module and security updates once CI passes. Other minors and majors of Go, Kubernetes and golangci-lint wait for review.
 
 ## Development
 

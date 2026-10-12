@@ -15,7 +15,8 @@
   "vulnerabilityAlerts": {
     "schedule": ["at any time"],
     "minimumReleaseAge": null,
-    "labels": ["security"]
+    "labels": ["security"],
+    "automerge": true
   },
   "osvVulnerabilityAlerts": true,
   "lockFileMaintenance": {
@@ -41,10 +42,17 @@
       "rangeStrategy": "bump"
     },
     {
-      "description": "Go toolchain: go directive and golang base image move together; review by hand",
+      "description": "Go toolchain: go directive and golang base image move together",
       "groupName": "go toolchain",
-      "matchDepNames": ["go", "golang"],
-      "automerge": false
+      "matchDepNames": ["go", "golang"]
+    },
+    {
+      "description": "Indirect Go modules are off by default; govulncheck flags them",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["indirect"],
+      "enabled": true,
+      "groupName": "go indirect dependencies",
+      "automerge": true
     },
     {
       "description": "Kubernetes stack moves as one. A controller-tools bump changes the CRDs; the verify job fails until 'make generate manifests' is committed. Bump ENVTEST_K8S_VERSION and SETUP_ENVTEST_VERSION in the Makefile by hand in the same PR",
@@ -74,6 +82,17 @@
       "description": "golangci-lint minors add lints; review by hand",
       "matchDepNames": ["golangci/golangci-lint"],
       "automerge": false
+    },
+    {
+      "description": "Go toolchain minors are reviewed by hand; patches (security fixes) merge on their own. Last, so it wins over the rules above",
+      "matchDepNames": ["go", "golang"],
+      "matchUpdateTypes": ["major", "minor"],
+      "automerge": false
+    },
+    {
+      "matchDepNames": ["go", "golang"],
+      "matchUpdateTypes": ["patch", "digest", "pinDigest"],
+      "automerge": true
     }
   ]
 }
