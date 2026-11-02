@@ -3,7 +3,7 @@ module github.com/nashant/upnp-nat-controller
 go 1.27.3
 
 require (
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/google/go-cmp v0.7.0
 	github.com/huin/goupnp v1.3.0
 	github.com/prometheus/client_golang v1.24.1
