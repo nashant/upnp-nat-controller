@@ -10,7 +10,7 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 SETUP_ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
 # renovate: datasource=github-releases depName=golangci/golangci-lint
-GOLANGCI_LINT_VERSION ?= v2.14.0
+GOLANGCI_LINT_VERSION ?= v2.15.0
 
 UNIT_PKGS = ./internal/annotations/... ./internal/mapping/... ./internal/upnp/... ./internal/health/... ./internal/ipclass/... ./internal/metrics/...
 
