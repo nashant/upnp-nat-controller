@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/nashant/upnp-nat-controller/compare/v0.2.1...v0.2.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/go-logr/logr to v1.4.4 ([#19](https://github.com/nashant/upnp-nat-controller/issues/19)) ([1c1ace3](https://github.com/nashant/upnp-nat-controller/commit/1c1ace3606ef8dc6e85e90e2ae37949f3163f4ee))
+
 ## [0.2.1](https://github.com/nashant/upnp-nat-controller/compare/v0.2.0...v0.2.1) (2026-10-12)
 
 
