@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/nashant/upnp-nat-controller/compare/v0.2.2...v0.2.3) (2026-11-09)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/huin/goupnp to v1.3.1 ([#25](https://github.com/nashant/upnp-nat-controller/issues/25)) ([da3bcc6](https://github.com/nashant/upnp-nat-controller/commit/da3bcc6937e767eb69fb57e42311d0ae0bd652ed))
+
 ## [0.2.2](https://github.com/nashant/upnp-nat-controller/compare/v0.2.1...v0.2.2) (2026-11-02)
 
 
