@@ -2,7 +2,7 @@ IMG ?= ghcr.io/nashant/upnp-nat-controller:dev
 # Bumped by hand with the Renovate "kubernetes" group:
 ENVTEST_K8S_VERSION ?= 1.37.x
 # renovate: datasource=github-releases depName=kubernetes-sigs/controller-tools
-CONTROLLER_TOOLS_VERSION ?= v0.22.0
+CONTROLLER_TOOLS_VERSION ?= v0.23.0
 SETUP_ENVTEST_VERSION ?= release-0.25
 
 LOCALBIN ?= $(CURDIR)/bin
