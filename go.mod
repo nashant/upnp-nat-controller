@@ -6,7 +6,7 @@ require (
 	github.com/go-logr/logr v1.4.4
 	github.com/google/go-cmp v0.7.0
 	github.com/huin/goupnp v1.3.1
-	github.com/prometheus/client_golang v1.24.1
+	github.com/prometheus/client_golang v1.25.0
 	golang.org/x/time v0.16.0
 	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.0
